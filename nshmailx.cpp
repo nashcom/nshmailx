@@ -1,7 +1,7 @@
 /*
 ###########################################################################
 # NashCom SMTP mail test/send tool (nshmailx)                             #
-# Version 1.0.9 12.07.2025                                                #
+# Version 1.1.0 30.07.2025                                                #
 # (C) Copyright Daniel Nashed/NashCom 2025                                #
 #                                                                         #
 # This application can be used to troubleshoot and test SMTP connections. #
@@ -109,11 +109,15 @@ Dump key and certificate information via OpenSSL code
 
 - Add options to send test mails 
 
+1.1.0 30.07.2025
+
+- Moved to separate GitHub repository and standardized build & release with Alpine based GitHub build flow
+
 */
 
 
 
-#define VERSION "1.0.9"
+#define VERSION "1.1.0"
 #define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
