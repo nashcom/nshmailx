@@ -8,6 +8,12 @@ jobs:
   release:
     name: Build & Upload Binaries
     runs-on: ubuntu-latest
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip uploading assets (test build only)"
+        required: false
+        default: "true"
 
     permissions:
       contents: write  # Required to create releases
