@@ -107,7 +107,7 @@ Dump key and certificate information via OpenSSL code
 
 1.0.9 12.07.2025
 
-- Add options to send test mails 
+- Add options to send test mails
 
 1.1.0 30.07.2025
 
@@ -146,8 +146,8 @@ Dump key and certificate information via OpenSSL code
 #include <openssl/core_names.h>
 #endif
 
-#include "nshmailx.hpp" 
-#include "testing.hpp" 
+#include "nshmailx.hpp"
+#include "testing.hpp"
 
 #define MAX_BUFFER_LEN 65535
 #define MAX_STR        1024
@@ -1135,7 +1135,7 @@ int LogChain (const char *pszHeader, STACK_OF(X509) *pChain)
         printf ("%s(%d)\n", pszHeader, count);
         return 0;
     }
- 
+
     for (i=0; i<count; ++i)
     {
         snprintf (szBuffer, sizeof (szBuffer), "%s #%d", pszHeader, i);
@@ -1310,9 +1310,9 @@ int SendSmtpMessage (const char *pszHostname,
                      const char *pszBodyFile,
                      const char *pszAttachmenFilePath,
                      const char *pszAttachmentName,
-		     const char *pszAttachmentBuffer,
+             const char *pszAttachmentBuffer,
                      const char *pszCipherList,
-		     int    Port,
+             int    Port,
                      size_t Options)
 {
     int ret = 0;
@@ -1726,9 +1726,9 @@ int SendSmtpMessage (const char *pszHostname,
             if (IsNullStr (pszAttachmenFilePath))
             {
                 pszAttachmentName = szDefaultAttachmenName;
-	    }
-	    else
-	    {
+        }
+        else
+        {
                 /* Get attachment name from file path */
                 pszAttachmentName = pszAttachmenFilePath;
                 pStr = pszAttachmenFilePath;
@@ -1768,16 +1768,16 @@ int SendSmtpMessage (const char *pszHostname,
 
         pBioMem = BIO_push (pBioB64, pBioMem);
 
-        if (!IsNullStr(pszAttachmentBuffer)) 
+        if (!IsNullStr(pszAttachmentBuffer))
         {
-	    ret = BIO_write (pBioMem, pszAttachmentBuffer, strlen (pszAttachmentBuffer));
-	    if (ret <=0)
-	    {
+        ret = BIO_write (pBioMem, pszAttachmentBuffer, strlen (pszAttachmentBuffer));
+        if (ret <=0)
+        {
                 LogError ("Cannot write attachment buffer\n");
                 goto Done;
-	    }
-	}
-	else
+        }
+    }
+    else
         {
             if (0 == strcmp (pszAttachmenFilePath, "-"))
             {
@@ -1798,7 +1798,7 @@ int SendSmtpMessage (const char *pszHostname,
 
             BIO_free_all (pBioFile);
             pBioFile = NULL;
-	}
+    }
 
         BIO_flush (pBioMem);
         MemSize = BIO_get_mem_data (pBioMem, &pMem);
@@ -1996,13 +1996,13 @@ int ReadConfig (const char *pszConfigFile)
         else if ( GetParam ("tls", szBuffer, pszValue, sizeof (szNum), szNum))
         {
             if (0 == atoi (szNum))
-	        g_Options |= NSHMAILX_OPTIONS_NO_TLS;
+            g_Options |= NSHMAILX_OPTIONS_NO_TLS;
         }
 
         else if ( GetParam ("notls13", szBuffer, pszValue, sizeof (szNum), szNum))
         {
             if (atoi (szNum))
-                g_Options |= NSHMAILX_OPTIONS_NO_TLS13; 
+                g_Options |= NSHMAILX_OPTIONS_NO_TLS13;
         }
 
         else if ( GetParam ("verify", szBuffer, pszValue, sizeof (szNum), szNum))
@@ -2113,22 +2113,22 @@ int main (int argc, const char *argv[])
 
         else if (0 == strcasecmp (argv[consumed], "-notls"))
         {
-            Options |= NSHMAILX_OPTIONS_NO_TLS; 
+            Options |= NSHMAILX_OPTIONS_NO_TLS;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-notls13"))
         {
-            Options |= NSHMAILX_OPTIONS_NO_TLS13; 
+            Options |= NSHMAILX_OPTIONS_NO_TLS13;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-ec"))
         {
-            Options |= NSHMAILX_OPTIONS_USE_ECDSA;            
+            Options |= NSHMAILX_OPTIONS_USE_ECDSA;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-verify"))
         {
-            Options |= NSHMAILX_OPTIONS_VERIFY; 
+            Options |= NSHMAILX_OPTIONS_VERIFY;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-silent"))
@@ -2176,8 +2176,8 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             Port = atoi(argv[consumed]);
-	    if (0 == Port)
-	        Port = 25;
+        if (0 == Port)
+            Port = 25;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-server"))
@@ -2344,9 +2344,9 @@ int main (int argc, const char *argv[])
 
             TestMessageCount = atoi(argv[consumed]);
             if (0 == TestMessageCount)
-	    {
+        {
                 goto InvalidSyntax;
-	    }
+        }
         }
 
         else if (0 == strcasecmp (argv[consumed], "-TestBodySize"))
@@ -2503,15 +2503,15 @@ int main (int argc, const char *argv[])
                                pszBodyFile,
                                pszAttachmenFilePath,
                                pszAttachmentName,
-			       "",
+                   "",
                                pszCipherList,
                                Port,
                                Options,
-                               TestMessageCount, 
-                               TestMessageBodySize, 
+                               TestMessageCount,
+                               TestMessageBodySize,
                                TestMesageAttSize);
     }
-    else	  
+    else
     {
         rc = SendSmtpMessage (pszHostname,
                               pszMailer,
@@ -2526,9 +2526,9 @@ int main (int argc, const char *argv[])
                               pszBodyFile,
                               pszAttachmenFilePath,
                               pszAttachmentName,
-			      NULL,
+                  NULL,
                               pszCipherList,
-		              Port,
+                      Port,
                               Options);
     }
 
