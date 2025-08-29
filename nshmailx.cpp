@@ -675,19 +675,18 @@ int CopyFromToBio (BIO *pBioIn, BIO *pBioOut)
 
 size_t GetMxRecord (const char *pszDomain, size_t MaxBuffer, char *retpszBuffer, int *retpPriority)
 {
-    unsigned char Buffer[32000]  = {0};
-    char   Result[1024]          = {0};
-    int    Priority              = 0;
-    int    LowestPriority        = 0;
-    int    ret                   = 0;
+    unsigned char Buffer[32000] = {0};
+    char Result[1024]   = {0};
+    int  LowestPriority = 0;
+    int  Priority = 0;
+    int  ret      = 0;
+    int  len      = 0;
+    int  count    = 0;
+    int  found    = 0;
+    int  i        = 0;
 
     ns_msg nsMsg  = {0};
     ns_rr  rr     = {{0}};
-
-    size_t len    = 0;
-    size_t count  = 0;
-    size_t found  = 0;
-    size_t i      = 0;
 
     if (MaxBuffer && retpszBuffer)
         *retpszBuffer = '\0';
@@ -703,7 +702,7 @@ size_t GetMxRecord (const char *pszDomain, size_t MaxBuffer, char *retpszBuffer,
         goto Done;
     }
 
-    len = res_query (pszDomain, ns_c_in, ns_t_mx, Buffer, sizeof(Buffer)-1);
+    len = res_query (pszDomain, ns_c_in, ns_t_mx, Buffer, sizeof(Buffer));
 
     if (len <= 0)
     {
