@@ -25,6 +25,7 @@ int SendSmtpMessage (const char *pszHostname,
                      const char *pszAttachmentName,
                      const char *pszAttachmentBuffer,
                      const char *pszCipherList,
+		     const char *pszSmimeCert,
                      int  Port,
                      size_t Options);
 

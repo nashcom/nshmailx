@@ -113,11 +113,16 @@ Dump key and certificate information via OpenSSL code
 
 - Moved to separate GitHub repository and standardized build & release with Alpine based GitHub build flow
 
+1.2.0 08.12.2025
+
+- Message-ID with timestamp
+- Basic support for S/MIME
+
 */
 
 
 
-#define VERSION "1.1.0"
+#define VERSION "1.2.0"
 #define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -140,6 +145,9 @@ Dump key and certificate information via OpenSSL code
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 #include <openssl/x509v3.h>
+#include <openssl/cms.h>
+#include <openssl/pem.h>
+
 
 #ifdef LIBRESSL_VERSION_NUMBER
 #else
@@ -158,9 +166,10 @@ Dump key and certificate information via OpenSSL code
 
 /* Globals */
 
-BIO     *g_pBio    = NULL;
-SSL     *g_pSSL    = NULL;
-SSL_CTX *g_pCtxSSL = NULL;
+BIO     *g_pBio      = NULL;
+BIO     *g_pBioSMIME = NULL;
+SSL     *g_pSSL      = NULL;
+SSL_CTX *g_pCtxSSL   = NULL;
 
 char g_ProgramName[] = "nshmailx";
 char g_szConfigFile[] = "/etc/nshmailx.cfg";
@@ -592,7 +601,11 @@ int SendBuffer (const char *pszBuffer)
     if (g_Trace)
         printf ("C:%s", pszBuffer);
 
-    if (g_pSSL)
+    if (g_pBioSMIME)
+    {
+        ret = BIO_puts (g_pBioSMIME, pszBuffer);
+    }
+    else if (g_pSSL)
     {
         ret = SSL_write_ex (g_pSSL, pszBuffer, strlen (pszBuffer), &byteswritten);
     }
@@ -641,35 +654,26 @@ int CheckLocalAvailableCiphers()
 
 int CopyFromToBio (BIO *pBioIn, BIO *pBioOut)
 {
-    /* Returns 1 for success */
+    int readbytes  = 0;
+    int writebytes = 0;
 
-    int  writebytes = 0;
-    int  readbytes  = 0;
-
-    if (NULL == pBioIn)
-        return 0;
-
-    if (NULL == pBioOut)
+    if (!pBioIn || !pBioOut)
         return 0;
 
     while (1)
     {
-        readbytes = BIO_read (pBioIn, g_szBuffer, sizeof (g_szBuffer)-1);
+        readbytes = BIO_read(pBioIn, g_szBuffer, sizeof(g_szBuffer));
 
-        if (0 == readbytes)
-            break;
+        if (readbytes <= 0)
+            break; /* EOF or no more data */
 
-        if (readbytes < 0)
-            return readbytes;
+        writebytes = BIO_write(pBioOut, g_szBuffer, readbytes);
 
-        writebytes = BIO_write (pBioOut, g_szBuffer, readbytes);
+        if (writebytes != readbytes)
+            return 0; /* write failure */
+    }
 
-        if (writebytes < 0)
-            return writebytes;
-
-    } /* while */
-
-    return 1;
+    return 1; /* success */
 }
 
 
@@ -1146,6 +1150,7 @@ int LogChain (const char *pszHeader, STACK_OF(X509) *pChain)
     return ret;
 }
 
+
 int LogChainInfos (SSL *pSSL)
 {
     int   ret   = 0;
@@ -1162,6 +1167,7 @@ int LogChainInfos (SSL *pSSL)
 
     return ret;
 }
+
 
 int LogSSLInfos (SSL *pSSL)
 {
@@ -1296,6 +1302,144 @@ void ssl_info_callback (const SSL *pSSL, int where, int ret)
 #endif
 
 
+X509 *LoadX509FromBase64 (const char *pszBase64)
+{
+    long der_len = 0;
+    long b64_len = 0;
+    int out_len  = 0;
+    X509 *pX509Cert = NULL;
+    const unsigned char *p = NULL;
+    unsigned char *pDER = NULL;
+
+    if (IsNullStr(pszBase64))
+        return NULL;
+
+    b64_len = strlen (pszBase64);
+
+    pDER = ( unsigned char *) malloc (b64_len);
+    if (!pDER)
+        return NULL;
+
+    out_len = EVP_DecodeBlock (pDER, (const unsigned char *)pszBase64, b64_len);
+
+    if (out_len < 0)
+    {
+        goto Done;
+    }
+
+    der_len = out_len;
+
+    p = pDER;
+    pX509Cert = d2i_X509 (NULL, &p, der_len);
+
+Done:
+
+    if (pDER)
+        free(pDER);
+
+    return pX509Cert;
+}
+
+
+X509 *LoadX509FromFile (const char *pszCertFileName)
+{
+    X509 *pX509   = NULL;
+    BIO *pCertBio = NULL;
+
+    if (NULL == pszCertFileName)
+        return NULL;
+
+    pCertBio = BIO_new_file (pszCertFileName, "r");
+
+    if (!pCertBio)
+    {
+        perror ("Cannot open certificate file");
+        goto Done;
+    }
+
+    pX509 = PEM_read_bio_X509 (pCertBio, NULL, NULL, NULL);
+
+Done:
+
+ if (pCertBio)
+        BIO_free (pCertBio);
+
+    return pX509;
+}
+
+
+X509 *LoadX509 (const char *pszCert)
+{
+   if (NULL == pszCert)
+    return NULL;
+
+   if (strstr (pszCert, ".pem" ))
+       return LoadX509FromFile (pszCert);
+
+   return LoadX509FromBase64 (pszCert);
+}
+
+
+int EncryptMessage (const char *pszCert, BIO *pBioInput, BIO *pBioOutput)
+{
+    int ret = 1; /* Assume error until OK */
+    X509 *pX509Recipient  = NULL;
+    CMS_ContentInfo *pCMS = NULL;
+    STACK_OF(X509) *pX509Recipients = NULL;
+
+    if (NULL == pszCert)
+        goto Done;
+
+    if (NULL == pBioInput)
+        goto Done;
+
+    if (NULL == pBioOutput)
+        goto Done;
+
+    pX509Recipient = LoadX509 (pszCert);
+
+    if (NULL == pX509Recipient)
+    {
+	LogError ("Cannot get recipient public key", pszCert);
+        goto Done;
+    }
+
+    pX509Recipients = sk_X509_new_null();
+    sk_X509_push (pX509Recipients, pX509Recipient);
+
+    /* Encrypt using CMS (S/MIME envelopedData) */
+    pCMS = CMS_encrypt (pX509Recipients, pBioInput, EVP_aes_256_cbc(), CMS_STREAM);
+
+    if (!pCMS)
+    {
+        fprintf (stderr, "CMS_encrypt failed\n");
+        ERR_print_errors_fp (stderr);
+        goto Done;
+    }
+
+    if (!SMIME_write_CMS (pBioOutput, pCMS, pBioInput, CMS_STREAM))
+    {
+        fprintf (stderr, "SMIME_write_CMS failed\n");
+        ERR_print_errors_fp (stderr);
+        goto Done;
+    }
+
+    printf("OK: S/MIME encrypted message written\n");
+    ret = 0;
+
+Done:
+
+    if (pCMS)
+        CMS_ContentInfo_free (pCMS);
+
+    if (pX509Recipients)
+        sk_X509_pop_free (pX509Recipients, X509_free);
+
+    return ret;
+}
+
+
+
 int SendSmtpMessage (const char *pszHostname,
                      const char *pszMailer,
                      const char *pszSmtpServerAddress,
@@ -1309,9 +1453,10 @@ int SendSmtpMessage (const char *pszHostname,
                      const char *pszBodyFile,
                      const char *pszAttachmenFilePath,
                      const char *pszAttachmentName,
-             const char *pszAttachmentBuffer,
+                     const char *pszAttachmentBuffer,
                      const char *pszCipherList,
-             int    Port,
+                     const char *pszSmimeCert,
+                     int    Port,
                      size_t Options)
 {
     int ret = 0;
@@ -1341,7 +1486,9 @@ int SendSmtpMessage (const char *pszHostname,
     size_t MemSize = 0;
     size_t CountMX = 0;
     time_t tNow    = time (NULL);
-
+    struct tm tm;
+    gmtime_r(&tNow, &tm);
+    char ts[32] = {0};
 
     if (IsNullStr (pszHostname))
     {
@@ -1365,16 +1512,17 @@ int SendSmtpMessage (const char *pszHostname,
     /* Get SMTP server from first mail address */
     if (IsNullStr (pszSmtpServerAddress))
     {
-        if (pszSendTo)
+        if (!IsNullStr (pszSendTo))
             pszDomain = strchr (pszSendTo, '@');
-        else if (pszCopyTo)
+        else if (!IsNullStr (pszCopyTo))
             pszDomain = strchr (pszCopyTo, '@');
-        else if (pszBlindCopyTo)
+        else if (!!IsNullStr (pszBlindCopyTo))
             pszDomain = strchr (pszBlindCopyTo, '@');
 
         if (pszDomain)
         {
             pszDomain++;
+	    printf ("Domain: %s\n", pszDomain);
             CountMX = GetMxRecord (pszDomain, sizeof (szMX), szMX, &PriorityMX);
 
             if (CountMX)
@@ -1581,15 +1729,13 @@ int SendSmtpMessage (const char *pszHostname,
         SendBuffer (g_szBuffer);
     }
 
-    snprintf (g_szBuffer, sizeof (g_szBuffer), "MIME-Version: 1.0%s", CRLF);
-    SendBuffer (g_szBuffer);
-
+    strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tm);
     GetRandomString (NULL, 20, szRandom);
 
     if (pszHostname)
-        snprintf (g_szBuffer, sizeof (g_szBuffer), "Message-ID: <%s@%s>%s", szRandom, pszHostname, CRLF);
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "Message-ID: <%s-%s@%s>%s", ts, szRandom, pszHostname, CRLF);
     else
-        snprintf (g_szBuffer, sizeof (g_szBuffer), "Message-ID: <%s>%s", szRandom, CRLF);
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "Message-ID: <%s-%s@%s>%s", ts, szRandom, "localhost", CRLF);
 
     SendBuffer (g_szBuffer);
 
@@ -1602,6 +1748,22 @@ int SendSmtpMessage (const char *pszHostname,
 
         SendBuffer (g_szBuffer);
     }
+
+    /* For S/MIME messages open a S/MIME BIO to write to it encrypted before sending it.
+       All following SendBuffer operations go into the S/MIME BIO */
+
+    if (!IsNullStr (pszSmimeCert))
+    {
+        g_pBioSMIME = BIO_new (BIO_s_mem());
+        if (NULL == g_pBioSMIME)
+        {
+            LogError ("Cannot create memory BIO");
+            goto Done;
+        }
+    }
+
+    snprintf (g_szBuffer, sizeof (g_szBuffer), "MIME-Version: 1.0%s", CRLF);
+    SendBuffer (g_szBuffer);
 
     GetRandomString (NULL, 40, szRandom);
     snprintf (szBoundary, sizeof (szBoundary), "%s", szRandom);
@@ -1725,9 +1887,9 @@ int SendSmtpMessage (const char *pszHostname,
             if (IsNullStr (pszAttachmenFilePath))
             {
                 pszAttachmentName = szDefaultAttachmenName;
-        }
-        else
-        {
+            }
+            else
+            {
                 /* Get attachment name from file path */
                 pszAttachmentName = pszAttachmenFilePath;
                 pStr = pszAttachmenFilePath;
@@ -1769,14 +1931,14 @@ int SendSmtpMessage (const char *pszHostname,
 
         if (!IsNullStr(pszAttachmentBuffer))
         {
-        ret = BIO_write (pBioMem, pszAttachmentBuffer, strlen (pszAttachmentBuffer));
-        if (ret <=0)
-        {
+            ret = BIO_write (pBioMem, pszAttachmentBuffer, strlen (pszAttachmentBuffer));
+            if (ret <=0)
+            {
                 LogError ("Cannot write attachment buffer\n");
                 goto Done;
+            }
         }
-    }
-    else
+        else
         {
             if (0 == strcmp (pszAttachmenFilePath, "-"))
             {
@@ -1797,7 +1959,7 @@ int SendSmtpMessage (const char *pszHostname,
 
             BIO_free_all (pBioFile);
             pBioFile = NULL;
-    }
+        }
 
         BIO_flush (pBioMem);
         MemSize = BIO_get_mem_data (pBioMem, &pMem);
@@ -1816,6 +1978,40 @@ int SendSmtpMessage (const char *pszHostname,
 
     snprintf (g_szBuffer, sizeof (g_szBuffer), "--%s--%s", szBoundary, CRLF);
     SendBuffer (g_szBuffer);
+
+    /* Now get the S/MIME BIO and write it to the output file */
+    if (g_pBioSMIME)
+    {
+        BIO *pBioOutput = NULL;
+        BIO_flush (g_pBioSMIME);
+
+        pBioOutput = BIO_new(BIO_s_mem());
+        if (!pBioOutput)
+        {
+            goto Done;
+        }
+
+        ret = EncryptMessage (pszSmimeCert, g_pBioSMIME, pBioOutput);
+
+	/* Now first close S/MIME BIO to write again into output stream */
+        BIO_free_all (g_pBioSMIME);
+        g_pBioSMIME = NULL;
+
+	if (ret)
+	{
+            rc = 600;
+            goto Done;
+	}
+
+        MemSize = BIO_get_mem_data (pBioOutput, &pMem);
+
+        if ((pMem) && (MemSize))
+        {
+            SendBuffer (pMem);
+        }
+
+        BIO_free_all (pBioOutput);
+    }
 
     snprintf (g_szBuffer, sizeof (g_szBuffer), "%s.%s", CRLF, CRLF);
     SendBuffer (g_szBuffer);
@@ -1860,6 +2056,12 @@ Done:
     {
         BIO_free_all (g_pBio);
         g_pBio = NULL;
+    }
+
+    if (g_pBioSMIME)
+    {
+        BIO_free_all (g_pBioSMIME);
+        g_pBioSMIME = NULL;
     }
 
     if (g_pCtxSSL)
@@ -2068,6 +2270,7 @@ int main (int argc, const char *argv[])
     const char *pszBodyFile          = NULL;
     const char *pszAttachmenFilePath = NULL;
     const char *pszAttachmentName    = NULL;
+    const char *pszSmimeCert         = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
     const char *pszFrom              = g_szFrom;
@@ -2333,6 +2536,18 @@ int main (int argc, const char *argv[])
             pszCipherList = argv[consumed];
         }
 
+        else if (0 == strcasecmp (argv[consumed], "-smime"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszSmimeCert = argv[consumed];
+        }
+
         else if (0 == strcasecmp (argv[consumed], "-TestMessages"))
         {
             consumed++;
@@ -2482,10 +2697,10 @@ int main (int argc, const char *argv[])
     }
 
 
-// --- Main Logic ---
+    // --- Main Logic ---
 
-     // Always init random generator
-     srand((unsigned int) time(NULL));
+    // Always init random generator
+    srand((unsigned int) time(NULL));
 
     if (TestMessageCount)
     {
@@ -2502,7 +2717,7 @@ int main (int argc, const char *argv[])
                                pszBodyFile,
                                pszAttachmenFilePath,
                                pszAttachmentName,
-                   "",
+                               "",
                                pszCipherList,
                                Port,
                                Options,
@@ -2525,9 +2740,10 @@ int main (int argc, const char *argv[])
                               pszBodyFile,
                               pszAttachmenFilePath,
                               pszAttachmentName,
-                  NULL,
+                              NULL,
                               pszCipherList,
-                      Port,
+                              pszSmimeCert,
+                              Port,
                               Options);
     }
 

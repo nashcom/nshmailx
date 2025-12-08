@@ -304,6 +304,7 @@ int SendTestMessages(const char *pszHostname,
                               pszAttachmentName,
 			      pszAttachmentBuffer,
                               pszCipherList,
+			      NULL,
                               Port,
                               Options);
 
