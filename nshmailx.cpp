@@ -1,7 +1,7 @@
 /*
 ###########################################################################
 # NashCom SMTP mail test/send tool (nshmailx)                             #
-# Version 1.1.0 30.07.2025                                                #
+# Version 1.2.1 12.12.2025                                                #
 # (C) Copyright Daniel Nashed/NashCom 2025                                #
 #                                                                         #
 # This application can be used to troubleshoot and test SMTP connections. #
@@ -73,7 +73,6 @@ Dump key and certificate information via OpenSSL code
 
 - Change MX lookup code to work also on Alpine
 
-
 1.0.1 31.07.2024
 
 - Add configuration file (/etc/nshmailx.cfg)
@@ -118,11 +117,17 @@ Dump key and certificate information via OpenSSL code
 - Message-ID with timestamp
 - Basic support for S/MIME
 
+
+1.2.1 12.12.2025
+
+- Support for -encrypt command
+- New csv file for S/MIME keys and restricted recipients list
+
 */
 
 
 
-#define VERSION "1.2.0"
+#define VERSION "1.2.1"
 #define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -175,6 +180,8 @@ char g_ProgramName[] = "nshmailx";
 char g_szConfigFile[] = "/etc/nshmailx.cfg";
 char g_szBuffer[MAX_BUFFER_LEN+1] = {0};
 char g_szErrorBuffer[4096] = {0};
+char g_szRecipientFile[4096] = "/etc/nshmailx.csv";
+char g_Delim = ',';
 
 int    g_Verbose = 0;
 int    g_Trace   = 0;
@@ -358,6 +365,8 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-silent                Only log errors to stderr\n");
     fprintf (stderr, "-trace                 Show input and output with client/server tags)\n");
     fprintf (stderr, "-pem                   Dump pem data with cert/key info (specify twice for PEM of certificate chain)\n");
+    fprintf (stderr, "-encrypt               Encrypt message with S/MIME\n");
+    fprintf (stderr, "-smime                 S/MIME file with PEM or raw Base64 DER certificate\n");
 
     fprintf (stderr, "\n");
     fprintf (stderr, "-TestMessages          Number of test messages to send\n");
@@ -375,7 +384,8 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "hostname=<std>         Override default hostname\n");
     fprintf (stderr, "serveraddress=<addr>   Set server address/relay host\n");
     fprintf (stderr, "cipherlist=<list>      OpenSSL cipher list string (colon separated) used for a connection\n");
-    fprintf (stderr, "rcptallowed=<regex>    Regex expression to define allowed recipients\n");
+    fprintf (stderr, "rcptallowed=<regex>    Regex expression to define allowed recipients. Or specify 'file' for only allow entries from -reptfile\n");
+    fprintf (stderr, "rcptfile=<file>        File name of recipients file (default: %s)\n", g_szRecipientFile);
     fprintf (stderr, "tls=0|1                Use TLS (enabled by default, can be disabled via tls=0\n");
     fprintf (stderr, "notls13=0|1            Disable TLS 1.3\n");
     fprintf (stderr, "verify=0|1             Verify certificate chain\n");
@@ -395,35 +405,6 @@ bool IsNullStr (const char *pszStr)
         return 1;
 
     return 0;
-}
-
-
-bool RecipientAllowed (const char *pszRecipient)
-{
-    if (IsNullStr (pszRecipient))
-        return true; /* To avoid extra checks for empty recipients */
-
-    if (IsNullStr (g_szAllowedRecptsRegx))
-        return true;
-
-    try
-    {
-
-        std::string recipient = pszRecipient;
-        std::regex  pattern (g_szAllowedRecptsRegx);
-
-        if (std::regex_match (recipient, pattern))
-        {
-            return true;
-        }
-
-    } catch (const std::regex_error& e)
-    {
-        fprintf(stderr, "Error: Failed to check recipient: %s\n", e.what());
-        return false;
-    }
-
-    return false;
 }
 
 
@@ -1439,6 +1420,178 @@ Done:
 }
 
 
+char *FindUserLineInFile (const char *pszFilename, const char *pszMailAddress)
+{
+    char szLine[8192] = {0};
+    char *pszResult   = NULL;
+    char *pszDelim    = NULL;
+    char *p = NULL;
+
+    size_t LineLen = 0;
+    size_t AddrLen = 0;
+    size_t CurrentAddrLen = 0;
+
+    FILE *fp = NULL;
+
+    if (IsNullStr (pszFilename))
+        return NULL;
+
+    if (IsNullStr (pszMailAddress))
+        return NULL;
+
+    fp = fopen (pszFilename, "r");
+
+    if (NULL == fp)
+    {
+	printf ("Cannot open file: %s\n", pszFilename);
+        return NULL;
+    }
+
+    AddrLen = strlen (pszMailAddress);
+
+    while (fgets (szLine, sizeof (szLine), fp))
+    {
+        LineLen = 0;
+        CurrentAddrLen = 0;
+        pszDelim = NULL;
+
+        p = szLine;
+        while (*p)
+        {
+            if (*p < 32)
+            {
+                *p = '\0';
+                break;
+            }
+
+            if (g_Delim == *p)
+                pszDelim = p;
+
+            if (NULL == pszDelim)
+                CurrentAddrLen++;
+
+            LineLen++;
+	    p++;
+        } /* while */
+
+        if (AddrLen == CurrentAddrLen)
+        {
+            if (0 == strncasecmp (szLine, pszMailAddress, AddrLen))
+            {
+                pszResult = strdup(szLine);
+            }
+        }
+    } /* while Line */
+
+    if (fp)
+    {
+        fclose (fp);
+    }
+
+    return pszResult;
+}
+
+
+char * GetUserEntry (const char *pszRecipient)
+{
+    return FindUserLineInFile (g_szRecipientFile, pszRecipient);
+}
+
+
+char * GetPublicKeyFromLine (const char *pszLine)
+{
+    char *p = NULL;
+
+    if (IsNullStr (pszLine))
+        return NULL;
+
+    p = strchr ((char *)pszLine, g_Delim);
+
+    if (p)
+        return strdup (p+1);
+
+    return NULL;
+}
+
+
+char * GetPubKeySMIME (const char *pszRecipient)
+{
+    char *pszCertSMIME = NULL;
+    char *pszLine      = NULL;
+
+    if (IsNullStr (pszRecipient))
+        return NULL;
+
+    pszLine = GetUserEntry (pszRecipient);
+    pszCertSMIME = GetPublicKeyFromLine (pszLine);
+
+    if (pszLine)
+    {
+        free (pszLine);
+	pszLine = NULL;
+    }
+
+    return pszCertSMIME;
+}
+
+
+bool UserExists (const char *pszRecipient)
+{
+    char *pszLine = NULL;
+    bool bFound   = false;
+
+    if (IsNullStr (pszRecipient))
+        return NULL;
+
+    if (IsNullStr (g_szRecipientFile))
+        return NULL;
+
+    pszLine = GetUserEntry (pszRecipient);
+
+    if (pszLine)
+    {
+        free (pszLine);
+        pszLine = NULL;
+	bFound = true;
+    }
+
+    return bFound;
+}
+
+
+bool RecipientAllowed (const char *pszRecipient)
+{
+    if (IsNullStr (pszRecipient))
+        return true; /* To avoid extra checks for empty recipients */
+
+    if (IsNullStr (g_szAllowedRecptsRegx))
+        return true;
+
+    if (0 == strcmp (g_szAllowedRecptsRegx, "file"))
+    {
+        return UserExists (pszRecipient);
+    }
+
+    try
+    {
+
+        std::string recipient = pszRecipient;
+        std::regex  pattern (g_szAllowedRecptsRegx);
+
+        if (std::regex_match (recipient, pattern))
+        {
+            return true;
+        }
+
+    } catch (const std::regex_error& e)
+    {
+        fprintf(stderr, "Error: Failed to check recipient: %s\n", e.what());
+        return false;
+    }
+
+    return false;
+}
+
 
 int SendSmtpMessage (const char *pszHostname,
                      const char *pszMailer,
@@ -1473,6 +1626,7 @@ int SendSmtpMessage (const char *pszHostname,
     char szFrom[255]     = {0};
     char szMX[2048]      = {0};
     char *pMem           = NULL;
+    char *pszLocalSMIME  = NULL;
 
     const char szLocalHost[] = "127.0.0.1";
     const char szDefaultAttachmenName[] = "message.txt";
@@ -1489,6 +1643,22 @@ int SendSmtpMessage (const char *pszHostname,
     struct tm tm;
     gmtime_r(&tNow, &tm);
     char ts[32] = {0};
+
+
+    if (Options & NSHMAILX_OPTIONS_ENCRYPT)
+    {
+        if  (IsNullStr (pszSmimeCert))
+        {
+           pszLocalSMIME = GetPubKeySMIME (pszSendTo);
+	   pszSmimeCert = pszLocalSMIME;
+
+           if  (IsNullStr (pszSmimeCert))
+           {
+	       LogError ("No S/MIME key specified");
+               goto Done;
+	   }
+	}
+    }
 
     if (IsNullStr (pszHostname))
     {
@@ -2070,6 +2240,12 @@ Done:
         g_pCtxSSL = NULL;
     }
 
+    if (pszLocalSMIME)
+    {
+        free (pszLocalSMIME);
+	pszLocalSMIME = NULL;
+    }
+
     if (!g_bSilent)
         printf ("Cleanup Done.\n");
 
@@ -2193,6 +2369,7 @@ int ReadConfig (const char *pszConfigFile)
         else if ( GetParam ("serveraddress", szBuffer, pszValue, sizeof (g_szSmtpServerAddress), g_szSmtpServerAddress));
         else if ( GetParam ("cipherlist",    szBuffer, pszValue, sizeof (g_szCipherList),        g_szCipherList));
         else if ( GetParam ("rcptallowed",   szBuffer, pszValue, sizeof (g_szAllowedRecptsRegx), g_szAllowedRecptsRegx));
+        else if ( GetParam ("rcptfile",      szBuffer, pszValue, sizeof (g_szRecipientFile),     g_szRecipientFile));
 
         else if ( GetParam ("tls", szBuffer, pszValue, sizeof (szNum), szNum))
         {
@@ -2232,6 +2409,14 @@ int ReadConfig (const char *pszConfigFile)
         else if ( GetParam ("port", szBuffer, pszValue, sizeof (szNum), szNum))
         {
             g_Port = atoi (szNum);
+        }
+
+        else if ( GetParam ("encrypt", szBuffer, pszValue, sizeof (szNum), szNum))
+        {
+            if (atoi (szNum))
+            {
+                g_Options |= NSHMAILX_OPTIONS_ENCRYPT;
+            }
         }
 
         else
@@ -2546,6 +2731,11 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             pszSmimeCert = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-encrypt"))
+        {
+            Options |= NSHMAILX_OPTIONS_ENCRYPT;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-TestMessages"))
