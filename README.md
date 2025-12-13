@@ -62,7 +62,8 @@ Usage: nshmailx [Options]
 
 SFTP Put Options (only supports user/password. for key authentication use scp)
 
--sftp <host>           Specify SFTP host name or IP
+-sput <host>           SFTP Put. Specify SFTP host name or IP
+-sget <host>           SFTP Get. Specify SFTP host name or IP
 -user <username>       SFTP user name
 -password <password>   user password
 -att <filepath>        file to upload

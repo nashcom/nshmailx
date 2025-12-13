@@ -251,7 +251,8 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-TestAttSize  <bytes>  Size of test attachment in bytes\n");
 
     fprintf (stderr, "\n\nSFTP Put Options (only supports user/password. for key authentication use scp)\n\n");
-    fprintf (stderr, "-sftp <host>           Specify SFTP host name or IP\n");
+    fprintf (stderr, "-sput <host>           SFTP Put. Specify SFTP host name or IP\n");
+    fprintf (stderr, "-sget <host>           SFTP Get. Specify SFTP host name or IP\n");
     fprintf (stderr, "-user <username>       SFTP user name\n");
     fprintf (stderr, "-password <password>   user password\n");
     fprintf (stderr, "-att <filepath>        file to upload\n");
@@ -2245,8 +2246,7 @@ int main (int argc, const char *argv[])
     int consumed = 1;
     int Port     = 25;
     int SFTPPort = 22;
-
-    bool bSFTP   = false;
+    int SFTPMode = 0;
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2589,7 +2589,7 @@ int main (int argc, const char *argv[])
             }
         }
 
-        else if (0 == strcasecmp (argv[consumed], "-sftp"))
+        else if (0 == strcasecmp (argv[consumed], "-sput"))
         {
             consumed++;
             if (consumed >= argc)
@@ -2598,7 +2598,19 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             pszHostname = argv[consumed];
-            bSFTP = true;
+            SFTPMode = SFTP_MODE_PUT;
+        }
+
+       else if (0 == strcasecmp (argv[consumed], "-sget"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszHostname = argv[consumed];
+            SFTPMode = SFTP_MODE_GET;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-user"))
@@ -2673,10 +2685,16 @@ int main (int argc, const char *argv[])
         consumed++;
     } /* while */
 
-    if (bSFTP)
+    if (SFTP_MODE_PUT  == SFTPMode)
     {
         ret = sftp_put (pszHostname, SFTPPort, pszUser, pszPassword, pszAttachmenFilePath, pszRemotePath, pszExpectedHostKey);
 	goto Done;
+    }
+
+    if (SFTP_MODE_GET == SFTPMode)
+    {
+        ret = sftp_get (pszHostname, SFTPPort, pszUser, pszPassword, pszAttachmenFilePath, pszRemotePath, pszExpectedHostKey);
+        goto Done;
     }
 
     if  ((IsNullStr (pszSendTo)) && (IsNullStr (pszCopyTo)) && (IsNullStr (pszBlindCopyTo)))

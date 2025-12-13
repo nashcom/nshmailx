@@ -15,6 +15,7 @@
 #include <libssh2_sftp.h>
 
 #include "lib.hpp" 
+#include "sftp.hpp"
 
 
 int tcp_connect (const char *pszHost, uint16_t nPort)
@@ -128,36 +129,6 @@ void LogErrorSSH2 (LIBSSH2_SESSION *pSession, const char *pszErrorText)
 }
 
 
-#define SHA256_LEN 32
-
-bool xxcheck_ssh_hostkey (LIBSSH2_SESSION *pSession)
-{
-    const unsigned char *pszHash;
-    char szHash[(SHA256_LEN * 2) + 1];
-    int i;
-
-    if (!pSession)
-        return false;
-
-    pszHash = (const unsigned char *)
-        libssh2_hostkey_hash(
-            pSession,
-            LIBSSH2_HOSTKEY_HASH_SHA256
-        );
-
-    if (!pszHash)
-        return false;
-
-    for (i = 0; i < SHA256_LEN; i++)
-        snprintf(szHash + (i * 2), 3, "%02x", pszHash[i]);
-
-    szHash[SHA256_LEN * 2] = '\0';
-
-    printf("SSH host key SHA-256: %s\n", szHash);
-    return true;
-}
-
-
 static const char * ssh_hostkey_type_name (int nType)
 {
     switch (nType)
@@ -230,17 +201,23 @@ bool check_ssh_hostkey (LIBSSH2_SESSION *pSession, const char * pszExpectedHostK
 }
 
 
-int sftp_put (const char *pszHost,
-              uint16_t   nPort,
-              const char *pszUser,
-              const char *pszPass,
-              const char *pszLocalFile,
-              const char *pszRemotePath,
-	      const char *pszExpectedHostKey)
+int sftp_transfer (int        Mode,
+                   const char *pszHost,
+                   uint16_t   nPort,
+                   const char *pszUser,
+                   const char *pszPass,
+                   const char *pszLocalFile,
+                   const char *pszRemotePath,
+                   const char *pszExpectedHostKey)
 {
     int fdLocal = -1;
     int nSock   = -1;
-    int rc      =  1; /* Assume error until completed */
+    int rc      =  1; /* Assume error */
+
+    ssize_t cbIO      = 0;
+    ssize_t cbWritten = 0;
+
+    char *p = NULL;
 
     LIBSSH2_SESSION *pSession    = NULL;
     LIBSSH2_SFTP *pSftp          = NULL;
@@ -278,33 +255,47 @@ int sftp_put (const char *pszHost,
         return -1;
     }
 
+   if ( (Mode != SFTP_MODE_GET) && (Mode != SFTP_MODE_PUT) )
+    {
+        LogError ("Invalid mode specified");
+        return -1;
+    }
+
     if (0 == nPort)
         nPort = 22;
 
-    /* First check if the file exists */
-    fdLocal = open (pszLocalFile, O_RDONLY);
-    if  (fdLocal < 0)
+    /* Open local file */
+    if (SFTP_MODE_PUT == Mode)
+        fdLocal = open (pszLocalFile, O_RDONLY);
+    else if (SFTP_MODE_GET == Mode)
+        fdLocal = open (pszLocalFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    else
+    {
+        LogError ("Invalid mode");
+        goto Done;
+    }
+
+    if (fdLocal < 0)
     {
         LogError ("Unable to open local file");
         goto Done;
     }
 
-    /* init/term should be process wide, but this routine is only called once */
-    if  (0 != libssh2_init (0))
+    if (0 != libssh2_init (0))
     {
         LogError ("libssh2_init failed");
         goto Done;
     }
 
     nSock = tcp_connect (pszHost, nPort);
-    if  (nSock < 0)
+    if (nSock < 0)
     {
         LogError ("TCP connect failed");
         goto Done;
     }
 
     pSession = libssh2_session_init ();
-    if  (!pSession)
+    if (!pSession)
     {
         LogError ("Session init failed");
         goto Done;
@@ -316,7 +307,8 @@ int sftp_put (const char *pszHost,
         "ssh-ed25519,"
         "ecdsa-sha2-nistp256,"
         "rsa-sha2-512,"
-        "rsa-sha2-256");
+        "rsa-sha2-256"
+    );
 
     if (0 != libssh2_session_handshake (pSession, nSock))
     {
@@ -333,95 +325,167 @@ int sftp_put (const char *pszHost,
     }
 
     pSftp = libssh2_sftp_init (pSession);
-    if  (!pSftp)
+    if (NULL == pSftp)
     {
         LogErrorSSH2 (pSession, "SFTP init failed");
         goto Done;
     }
 
-    pHandle = libssh2_sftp_open (
-        pSftp,
-        pszRemotePath,
-        LIBSSH2_FXF_WRITE |
-        LIBSSH2_FXF_CREAT |
-        LIBSSH2_FXF_TRUNC,
-        0644);
+    /* Open remote file */
+    if (SFTP_MODE_PUT == Mode)
+    {
+        pHandle = libssh2_sftp_open (
+            pSftp,
+            pszRemotePath,
+            LIBSSH2_FXF_WRITE |
+            LIBSSH2_FXF_CREAT |
+            LIBSSH2_FXF_TRUNC,
+            0644);
+    }
+    else if (SFTP_MODE_GET == Mode)
+    {
+        pHandle = libssh2_sftp_open (
+            pSftp,
+            pszRemotePath,
+            LIBSSH2_FXF_READ,
+            0);
+    }
 
-    if  (NULL == pHandle)
+    if (NULL == pHandle)
     {
         LogError ("Unable to open remote file");
         goto Done;
     }
 
+    /* Transfer loop */
     while (true)
     {
-        ssize_t cbRead    = 0;
-        ssize_t cbLeft    = 0;
-        ssize_t cbWritten = 0;
-        char *p = NULL;
-
-        cbRead = read (fdLocal, szBuf, sizeof (szBuf));
-
-        if (cbRead == 0)
-            break; /* EOF */
-
-        if (cbRead < 0)
+        if (SFTP_MODE_PUT == Mode)
         {
-            LogError ("Local file read error");
-            goto Done;
-        }
+            cbIO = read (fdLocal, szBuf, sizeof (szBuf));
+            if (cbIO == 0)
+                break;
 
-        p = szBuf;
-        cbLeft = cbRead;
-
-        while (cbLeft > 0)
-        {
-            cbWritten = libssh2_sftp_write (pHandle, p, cbLeft);
-            if (cbWritten < 0)
+            if (cbIO < 0)
             {
-                LogError ("SFTP write error");
+                LogError ("Local file read error");
                 goto Done;
             }
 
-            p += cbWritten;
-            cbLeft -= cbWritten;
+            p = szBuf;
+
+            while (cbIO > 0)
+            {
+                cbWritten = libssh2_sftp_write (pHandle, p, cbIO);
+
+                if (cbWritten < 0)
+                {
+                    LogError ("SFTP write error");
+                    goto Done;
+                }
+
+                p    += cbWritten;
+                cbIO -= cbWritten;
+            }
         }
+        else if (SFTP_MODE_GET == Mode)
+        {
+            cbIO = libssh2_sftp_read (pHandle, szBuf, sizeof (szBuf));
+
+            if (cbIO == 0)
+                break;
+
+            if (cbIO < 0)
+            {
+                LogError ("SFTP read error");
+                goto Done;
+            }
+
+            p = szBuf;
+
+            while (cbIO > 0)
+            {
+                cbWritten = write (fdLocal, p, cbIO);
+                if (cbWritten <= 0)
+                {
+                    LogError ("Local file write error");
+                    goto Done;
+                }
+
+                p    += cbWritten;
+                cbIO -= cbWritten;
+            }
+        }
+	else
+        {
+	    goto Done;
+	}
     }
 
-    printf ("Upload successful: %s\n", pszRemotePath);
+    if (SFTP_MODE_PUT == Mode)
+        printf ("Upload successful: %s -> %s\n", pszLocalFile, pszRemotePath);
+    else if (SFTP_MODE_GET == Mode)
+        printf ("Dwonload successful: %s -> %s\n", pszRemotePath, pszLocalFile);
+
     rc = 0;
 
 Done:
 
-    if  (-1 != fdLocal)
-    {
+    if (fdLocal != -1)
         close (fdLocal);
-        fdLocal = -1;
-    }
 
-    if  (pHandle)
-    {
+    if (pHandle)
         libssh2_sftp_close (pHandle);
-    }
 
-    if  (pSftp)
-    {
+    if (pSftp)
         libssh2_sftp_shutdown (pSftp);
-    }
 
-    if  (pSession)
+    if (pSession)
     {
         libssh2_session_disconnect (pSession, "done");
         libssh2_session_free (pSession);
     }
 
-    if  (nSock >= 0)
-    {
+    if (nSock >= 0)
         close (nSock);
-    }
 
     libssh2_exit ();
     return rc;
 }
 
 
+int sftp_put (const char *pszHost,
+              uint16_t   nPort,
+              const char *pszUser,
+              const char *pszPass,
+              const char *pszLocalFile,
+              const char *pszRemotePath,
+              const char *pszExpectedHostKey)
+{
+    return sftp_transfer (SFTP_MODE_PUT,
+                          pszHost,
+                          nPort,
+                          pszUser,
+                          pszPass,
+                          pszLocalFile,
+                          pszRemotePath,
+                          pszExpectedHostKey);
+}
+
+int sftp_get (const char *pszHost,
+              uint16_t   nPort,
+              const char *pszUser,
+              const char *pszPass,
+              const char *pszLocalFile,
+              const char *pszRemotePath,
+              const char *pszExpectedHostKey)
+{
+    return sftp_transfer (SFTP_MODE_GET,
+                          pszHost,
+                          nPort,
+                          pszUser,
+                          pszPass,
+                          pszLocalFile,
+                          pszRemotePath,
+                          pszExpectedHostKey);
+}
