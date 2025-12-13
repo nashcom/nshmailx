@@ -289,8 +289,10 @@ int sftp_transfer (int        Mode,
     /* Open local file */
     if (SFTP_MODE_PUT == Mode)
         fdLocal = open (pszLocalFile, O_RDONLY);
+
     else if (SFTP_MODE_GET == Mode)
         fdLocal = open (pszLocalFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
     else
     {
         LogError ("Invalid mode");
@@ -526,7 +528,6 @@ int sftp_transfer (int        Mode,
 
     GetBytesHumanReadable (cbTotal, sizeof (szNumStr), szNumStr);
     CalculatePerformanceString (diff_ms, cbTotal, sizeof(szPerformanceString), szPerformanceString);
-    printf ("Mail send in %1.1f sec (Size: %s, Speed: %s)\n", (double)diff_ms / 1000.0, szNumStr, szPerformanceString);
 
     if (*szSHA)
     {
@@ -546,6 +547,18 @@ int sftp_transfer (int        Mode,
     rc = 0;
 
 Done:
+
+    if (rc)
+    {
+        if (SFTP_MODE_GET == Mode)
+        {
+            if (FileExists (pszLocalFile))
+            {
+                printf ("Info: Deleting partial download file: %s\n", pszLocalFile);
+                remove (pszLocalFile);
+            }
+        }
+    }
 
     if (pBuffer)
     {

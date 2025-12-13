@@ -325,3 +325,23 @@ long time_diff_ms (struct timespec start, struct timespec end)
 {
     return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
 }
+
+int FileExists (const char *pszFilename)
+{
+    int ret = 0;
+    struct stat Filestat = {0};
+
+    if (IsNullStr (pszFilename))
+        return 0;
+
+    ret = stat (pszFilename, &Filestat);
+
+    if (ret)
+        return 0;
+
+    if (S_IFDIR & Filestat.st_mode)
+        return 2;
+    else
+        return 1;
+}
+

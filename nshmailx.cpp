@@ -2075,26 +2075,6 @@ int GetParam (const char *pszParamName, const char *pszName, const char *pszValu
 }
 
 
-int FileExists (const char *pszFilename)
-{
-    int ret = 0;
-    struct stat Filestat = {0};
-
-    if (IsNullStr (pszFilename))
-        return 0;
-
-    ret = stat (pszFilename, &Filestat);
-
-    if (ret)
-        return 0;
-
-    if (S_IFDIR & Filestat.st_mode)
-        return 2;
-    else
-        return 1;
-}
-
-
 int ReadConfig (const char *pszConfigFile)
 {
     int  ret = 0;
@@ -2592,7 +2572,8 @@ int main (int argc, const char *argv[])
             }
         }
 
-        else if (0 == strcasecmp (argv[consumed], "-sput"))
+        else if ((0 == strcasecmp (argv[consumed], "sput")) ||
+                (0 == strcasecmp (argv[consumed], "-sput")))
         {
             consumed++;
             if (consumed >= argc)
@@ -2604,7 +2585,8 @@ int main (int argc, const char *argv[])
             SFTPMode = SFTP_MODE_PUT;
         }
 
-       else if (0 == strcasecmp (argv[consumed], "-sget"))
+        else if ((0 == strcasecmp (argv[consumed], "sget")) ||
+                (0 == strcasecmp (argv[consumed], "-sget")))
         {
             consumed++;
             if (consumed >= argc)

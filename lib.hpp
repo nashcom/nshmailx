@@ -19,5 +19,6 @@ void GetBytesHumanReadable (size_t bytes, size_t wMaxRetLen, char *retpNumberStr
 void GetBytesHumanReadableAligned (size_t bytes, size_t wMaxRetLen, char *retpNumberStr);
 int CalculatePerformanceString (size_t MSec, size_t Bytes, size_t wMaxRetLen, char *retpszPerformanceString);
 long time_diff_ms(struct timespec start, struct timespec end);
+int FileExists (const char *pszFilename);
 
 #endif
