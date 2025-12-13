@@ -31,7 +31,7 @@ $(info )
 # Else just link dynamically with OpenSSL
 else
 
-LIBS= -lssl -lcrypto -lresolv
+LIBS= -lssl -lcrypto -lresolv -lssh2
 
 $(info )
 $(info Build with OpenSSL dynamically linked)
@@ -45,14 +45,19 @@ TARGET?=$(PROGRAM)
 
 all: $(TARGET)
 
-$(TARGET): $(PROGRAM).o testing.o
-	$(CC) -o $(PROGRAM) $(PROGRAM).o testing.o $(LIBS) $(SPECIAL_LINK_OPTIONS)
-
+$(TARGET): $(PROGRAM).o lib.o sftp.o testing.o
+	$(CC) -o $(PROGRAM) $(PROGRAM).o lib.o sftp.o testing.o $(LIBS) $(SPECIAL_LINK_OPTIONS)
 
 $(PROGRAM).o: $(PROGRAM).cpp nshmailx.hpp testing.hpp
 	$(CC)  $(CFLAGS) $(PROGRAM).cpp $(SSL_INCLUDE_PATH) -O2
 
-testing.o: testing.cpp nshmailx.hpp testing.hpp
+lib.o: lib.cpp lib.hpp
+	$(CC)  $(CFLAGS) lib.cpp $(SSL_INCLUDE_PATH) -O2
+
+sftp.o: sftp.cpp sftp.hpp
+	$(CC)  $(CFLAGS) sftp.cpp $(SSL_INCLUDE_PATH) -O2
+
+testing.o: testing.cpp testing.hpp
 	$(CC)  $(CFLAGS) testing.cpp $(SSL_INCLUDE_PATH) -O2
 
 install: all

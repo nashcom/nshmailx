@@ -1,15 +1,21 @@
 CXX = g++
 CXXFLAGS = -O2 -Wall -static -pedantic
-LDFLAGS = -lssl -lcrypto 
+LDFLAGS = -lssl -lcrypto -lssh2 -lz
 TARGET = nshmailx
 
 all: $(TARGET)
 
-$(TARGET): nshmailx.o testing.o
-	$(CXX) $(CXXFLAGS) -o $(TARGET) nshmailx.o testing.o $(LDFLAGS)
+$(TARGET): nshmailx.o lib.o sftp.o testing.o
+	$(CXX) $(CXXFLAGS) -o $(TARGET) nshmailx.o lib.o sftp.o testing.o $(LDFLAGS)
 
 nshmailx.o: nshmailx.cpp nshmailx.hpp testing.hpp
 	$(CXX) $(CXXFLAGS) -c nshmailx.cpp -o nshmailx.o
+
+lib.o: lib.cpp lib.hpp
+	$(CXX) $(CXXFLAGS) -c lib.cpp -o lib.o
+
+sftp.o: sftp.cpp sftp.hpp lib.hpp
+	$(CXX) $(CXXFLAGS) -c sftp.cpp -o sftp.o
 
 testing.o: testing.cpp nshmailx.hpp testing.hpp
 	$(CXX) $(CXXFLAGS) -c testing.cpp -o testing.o

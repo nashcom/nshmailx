@@ -23,14 +23,16 @@ It also brings an admin into full control of the sending process.
 
 
 ```
-SMTP Test Tool 0.9.4
-OpenSSL 3.0.2 15 Mar 2022
-(Build on: OpenSSL 3.0.2 15 Mar 2022)
+Nash!Com SMTP Mail Tool 1.2.2
+Copyright 2024-2025, Nash!Com, Daniel Nashed
+OpenSSL 3.5.1 1 Jul 2025
+(Build on: OpenSSL 3.5.1 1 Jul 2025)
 
 Usage: nshmailx [Options]
 
 -server <FQDN/IP>      SMTP server DNS name or IP (Can be a relay host. By default MX record of the recipient's domain is used)
 -host <FQDN>           Hostname to send in EHLO (by default use server's hostname)
+-port <number>         Port of SMTP server (Default: 25)
 -from <email>          From address
 -name <real name>      Name to add to the from address as a phrase
 -to <email>            Send to recipient address
@@ -42,10 +44,50 @@ Usage: nshmailx [Options]
 -att <filepath>        Attachment to send (specify '-' for attaching stdin to a file)
 -attname <filename>    File name for file to attach
 -mailer <name>         Mailer Name
+-cipher <cipher list>  OpenSSL cipher list string (colon separated) used for a connection
 -NoTLS                 Disable TLS/SSL
--v                     Verbose logging
+-NoTLS13               Disable TLS 1.3
+-Verify                Verify TLS certificate
+-v                     Verbose logging (specify twice for more verbose logging)
+-silent                Only log errors to stderr
+-trace                 Show input and output with client/server tags)
+-pem                   Dump pem data with cert/key info (specify twice for PEM of certificate chain)
+-encrypt               Encrypt message with S/MIME
+-smime                 S/MIME file with PEM or raw Base64 DER certificate
+
+-TestMessages          Number of test messages to send
+-TestBodySize <bytes>  Bytes to sent for each test message body
+-TestAttSize  <bytes>  Size of test attachment in bytes
+
+
+SFTP Put Options (only supports user/password. for key authentication use scp)
+
+-sftp <host>           Specify SFTP host name or IP
+-user <username>       SFTP user name
+-password <password>   user password
+-att <filepath>        file to upload
+-remote <filepath>     remote path
+-hostkey <base64>      SSH compatible expected host key in Base64 without trailing =
 
 Note: Also supports Linux BSD mailx command line sending options
+
+Configuration file: /etc/nshmailx.cfg
+
+from=<addr>            Standard from address
+fromname=<addr>        Standard from name
+mailer=<str>           Mail agent
+hostname=<std>         Override default hostname
+serveraddress=<addr>   Set server address/relay host
+cipherlist=<list>      OpenSSL cipher list string (colon separated) used for a connection
+rcptallowed=<regex>    Regex expression to define allowed recipients. Or specify 'file' for only allow entries from -reptfile
+rcptfile=<file>        File name of recipients file (default: /etc/nshmailx.csv)
+tls=0|1                Use TLS (enabled by default, can be disabled via tls=0
+notls13=0|1            Disable TLS 1.3
+verify=0|1             Verify certificate chain
+ecdsa=0|1              Use ECDSA instead of RSA
+utf8=0|1               Use UTF8
+silent=0|1             Run silent. Only log errors to stderr
+
 ```
 
 ## Command Line Examples
@@ -92,3 +134,13 @@ It has been tested with OpenSSL 3.0.x
 
 Once the compiler and the OpenSSL development package is installed just run `make`.
 
+
+## Libs required for compiling
+
+### Redhat/CentOS
+
+dnf install openssl-devel libssh2-devel zlib-devel
+
+### Ubuntu/Debian
+
+apt install libssl-dev libssh2-1-dev zlib1g-dev

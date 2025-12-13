@@ -1,7 +1,7 @@
 /*
 ###########################################################################
 # NashCom SMTP mail test/send tool (nshmailx)                             #
-# Version 1.2.1 12.12.2025                                                #
+# Version 1.2.2 14.12.2025                                                #
 # (C) Copyright Daniel Nashed/NashCom 2025                                #
 #                                                                         #
 # This application can be used to troubleshoot and test SMTP connections. #
@@ -123,17 +123,20 @@ Dump key and certificate information via OpenSSL code
 - Support for -encrypt command
 - New csv file for S/MIME keys and restricted recipients list
 
+1.2.2 14.12.2025
+
+- Basic support for SFTP put
+- Source code restructuring  (lib.cpp and new sftp.cpp)
+
 */
 
 
-
-#define VERSION "1.2.1"
+#define VERSION "1.2.2"
 #define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
 #include <regex>
 #include <string>
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,13 +156,14 @@ Dump key and certificate information via OpenSSL code
 #include <openssl/cms.h>
 #include <openssl/pem.h>
 
-
 #ifdef LIBRESSL_VERSION_NUMBER
 #else
 #include <openssl/core_names.h>
 #endif
 
 #include "nshmailx.hpp"
+#include "lib.hpp"
+#include "sftp.hpp"
 #include "testing.hpp"
 
 #define MAX_BUFFER_LEN 65535
@@ -199,133 +203,6 @@ char g_szSmtpServerAddress[MAX_STR] = {0};
 char g_szCipherList[MAX_STR]        = {0};
 char g_szAllowedRecptsRegx[MAX_STR] = {0};
 
-
-void strdncpy (char *pszStr, const char *ct, size_t n)
-{
-    if (NULL == pszStr)
-        return;
-
-    if (n>0)
-    {
-        #pragma GCC diagnostic push
-        #pragma GCC diagnostic ignored "-Wstringop-truncation"
-        strncpy (pszStr, ct, n-1);
-        #pragma GCC diagnostic pop
-        pszStr[n-1] = '\0';
-    }
-}
-
-
-void LogWarning (const char *pszErrorText)
-{
-    if (NULL == pszErrorText)
-        return;
-
-    fprintf (stderr, "Warning: %s\n\n", pszErrorText);
-}
-
-
-void LogInvalidOption (const char *pszCommand, const char *pszOption)
-{
-    struct  tm TimeTM = {0};
-    ssize_t ret_size  = 0;
-    FILE    *fp       = NULL;
-    pid_t   ppid      = getppid();
-    time_t  tNow      = time (NULL);
-
-    char    szProcess[2048] = {0};
-    char    szBinary[2048]  = {0};
-    char    szExe[2048]     = {0};
-    char    szTime[100]     = {0};
-
-    if (NULL == pszOption)
-        return;
-
-    fprintf (stderr, "Warning - Unknown option: [%s]\n", pszOption);
-
-    ret_size = readlink ("/proc/self/exe", szExe, sizeof (szExe));
-
-    if (0 == ret_size)
-        *szExe = '\0';
-
-    fp = fopen ("/tmp/nshmailx.log", "a");
-
-    if (NULL == fp)
-        return;
-
-    snprintf (szProcess, sizeof (szProcess), "/proc/%d/exe", ppid);
-    ret_size = readlink (szProcess, szBinary, sizeof (szBinary));
-
-    if (0 == ret_size)
-        *szBinary = '\0';
-
-    localtime_r (&tNow, &TimeTM);
-    strftime (szTime, sizeof (szTime)-1, "%Y-%m-%d %H:%M:%S %z", &TimeTM);
-
-    fprintf (fp, "%s exe: %s, ppid: %d, ppbin: %s, unknown option: %s [%s]\n", szTime, szExe, ppid, szBinary, pszCommand, pszOption);
-
-    fclose (fp);
-    fp = NULL;
-}
-
-
-void LogError (const char *pszErrorText, const char *pszParam)
-{
-    if (NULL == pszErrorText)
-        return;
-
-    if (pszParam)
-        fprintf (stderr, "Error: %s: %s\n\n", pszErrorText, pszParam);
-    else
-        fprintf (stderr, "Error: %s\n\n", pszErrorText);
-
-    ERR_print_errors_fp (stderr);
-}
-
-void LogError (const char *pszErrorText)
-{
-    LogError (pszErrorText, NULL);
-}
-
-
-bool GetUser (uid_t uid, size_t MaxReturnBuffer, char *retpszBuffer)
-{
-    struct passwd *pPasswd = NULL;
-
-    if (MaxReturnBuffer && retpszBuffer)
-        *retpszBuffer = '\0';
-    else
-        return false;
-
-    pPasswd = getpwuid (uid);
-
-    if (NULL == pPasswd)
-        return false;
-
-    if (NULL == pPasswd->pw_name)
-        return false;
-
-    strdncpy (retpszBuffer, pPasswd->pw_name, MaxReturnBuffer);
-    return true;
-}
-
-
-size_t GetLocalHostname (char *retpszHostname, size_t MaxBuffer)
-{
-    if (NULL == retpszHostname)
-        return 0;
-
-    if (0 == MaxBuffer)
-        return 0;
-
-    if (gethostname (retpszHostname, MaxBuffer-1))
-    {
-        *retpszHostname = '\0';
-        return 0;
-    }
-
-    return strlen (retpszHostname);
-}
 
 
 void PrintVersion()
@@ -373,11 +250,16 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-TestBodySize <bytes>  Bytes to sent for each test message body\n");
     fprintf (stderr, "-TestAttSize  <bytes>  Size of test attachment in bytes\n");
 
-    fprintf (stderr, "\n");
-    fprintf (stderr, "Note: Also supports Linux BSD mailx command line sending options\n");
-    fprintf (stderr, "\n");
-    fprintf (stderr, "Configuration file: %s\n", g_szConfigFile);
-    fprintf (stderr, "\n");
+    fprintf (stderr, "\n\nSFTP Put Options (only supports user/password. for key authentication use scp)\n\n");
+    fprintf (stderr, "-sftp <host>           Specify SFTP host name or IP\n");
+    fprintf (stderr, "-user <username>       SFTP user name\n");
+    fprintf (stderr, "-password <password>   user password\n");
+    fprintf (stderr, "-att <filepath>        file to upload\n");
+    fprintf (stderr, "-remote <filepath>     remote path\n");
+    fprintf (stderr, "-hostkey <base64>      SSH compatible expected host key in Base64 without trailing =\n");
+
+    fprintf (stderr, "\nNote: Also supports Linux BSD mailx command line sending options\n\n");
+    fprintf (stderr, "Configuration file: %s\n\n", g_szConfigFile);
     fprintf (stderr, "from=<addr>            Standard from address\n");
     fprintf (stderr, "fromname=<addr>        Standard from name\n");
     fprintf (stderr, "mailer=<str>           Mail agent\n");
@@ -395,90 +277,6 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "\n");
 }
 
-
-bool IsNullStr (const char *pszStr)
-{
-    if (NULL == pszStr)
-        return 1;
-
-    if ('\0' == *pszStr)
-        return 1;
-
-    return 0;
-}
-
-
-size_t GetFileSize (const char *pszFileName)
-{
-    int ret = 0;
-    struct stat Filestat = {0};
-
-    if (IsNullStr (pszFileName))
-        return 0;
-
-    ret = stat (pszFileName, &Filestat);
-
-    if (ret)
-        return 0;
-
-    if (S_IFDIR & Filestat.st_mode)
-        return 0;
-
-    return Filestat.st_size;
-}
-
-
-int GetRandomString (const char *pszCharset, size_t len, char *retpszRandomString)
-{
-    const char    szDefaultCharset[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    unsigned char *p = (unsigned char *) retpszRandomString;
-
-    size_t MaxIndex = sizeof (szDefaultCharset)-1;
-    size_t i = 0;
-
-    if (len <=0)
-        return 1;
-
-    if (NULL == retpszRandomString)
-        return 1;
-
-    /* Room for null terminator */
-    len--;
-
-    if (pszCharset)
-        MaxIndex = strlen (pszCharset);
-    else
-        pszCharset = szDefaultCharset;
-
-    /* Generate random bytes and use them as a modulo index to generate chars from charset specified */
-    RAND_bytes ((unsigned char *) retpszRandomString, len);
-
-    for (i=0; i < len; i++)
-    {
-        *p = *(pszCharset+ (*p % MaxIndex));
-        p++;
-    }
-
-    *p = '\0';
-
-    return 0;
-}
-
-
-int GetTimeString (time_t *pTime, char *retpszTime, size_t MaxBuffer)
-{
-    struct tm TimeTM = {0};
-
-    if (MaxBuffer && retpszTime)
-        *retpszTime = '\0';
-    else
-        return 1;
-
-    gmtime_r (pTime, &TimeTM);
-    strftime (retpszTime, MaxBuffer, "%a, %d %b %Y %H:%M:%S %z", &TimeTM);
-
-    return 0;
-}
 
 
 size_t RecvBuffer()
@@ -1541,10 +1339,10 @@ bool UserExists (const char *pszRecipient)
     bool bFound   = false;
 
     if (IsNullStr (pszRecipient))
-        return NULL;
+        return false;
 
     if (IsNullStr (g_szRecipientFile))
-        return NULL;
+        return false;
 
     pszLine = GetUserEntry (pszRecipient);
 
@@ -2446,6 +2244,9 @@ int main (int argc, const char *argv[])
     int ret = 1;
     int consumed = 1;
     int Port     = 25;
+    int SFTPPort = 22;
+
+    bool bSFTP   = false;
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2456,6 +2257,10 @@ int main (int argc, const char *argv[])
     const char *pszAttachmenFilePath = NULL;
     const char *pszAttachmentName    = NULL;
     const char *pszSmimeCert         = NULL;
+    const char *pszUser              = NULL;
+    const char *pszPassword          = NULL;
+    const char *pszRemotePath        = NULL;
+    const char *pszExpectedHostKey   = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
     const char *pszFrom              = g_szFrom;
@@ -2563,8 +2368,10 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             Port = atoi(argv[consumed]);
-        if (0 == Port)
-            Port = 25;
+            if (0 == Port)
+                goto InvalidSyntax;
+
+	    SFTPPort = Port;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-server"))
@@ -2635,7 +2442,6 @@ int main (int argc, const char *argv[])
 
             pszBlindCopyTo = argv[consumed];
         }
-
 
         else if ( (0 == strcasecmp (argv[consumed], "-subject")) ||
                   (0 == strcasecmp (argv[consumed], "-s")) )
@@ -2748,9 +2554,9 @@ int main (int argc, const char *argv[])
 
             TestMessageCount = atoi(argv[consumed]);
             if (0 == TestMessageCount)
-        {
+            {
                 goto InvalidSyntax;
-        }
+            }
         }
 
         else if (0 == strcasecmp (argv[consumed], "-TestBodySize"))
@@ -2783,6 +2589,66 @@ int main (int argc, const char *argv[])
             }
         }
 
+        else if (0 == strcasecmp (argv[consumed], "-sftp"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszHostname = argv[consumed];
+            bSFTP = true;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-user"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszUser = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-password"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszPassword = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-remote"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszRemotePath = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-hostkey"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszExpectedHostKey = argv[consumed];
+        }
+
         else if (0 == strcasecmp (argv[consumed], "--"))
         {
             /* Ignored parameter */
@@ -2806,6 +2672,12 @@ int main (int argc, const char *argv[])
 
         consumed++;
     } /* while */
+
+    if (bSFTP)
+    {
+        ret = sftp_put (pszHostname, SFTPPort, pszUser, pszPassword, pszAttachmenFilePath, pszRemotePath, pszExpectedHostKey);
+	goto Done;
+    }
 
     if  ((IsNullStr (pszSendTo)) && (IsNullStr (pszCopyTo)) && (IsNullStr (pszBlindCopyTo)))
     {
