@@ -8,6 +8,7 @@
 
 
 #include "nshmailx.hpp"
+#include "lib.hpp"
 
 // Common Lorem Ipsum words
 const char* szLoremWords[] =
@@ -24,110 +25,6 @@ const char* szLoremWords[] =
 #define WORD_COUNT (sizeof(szLoremWords) / sizeof(szLoremWords[0]))
 #define MAX_SUFFIX_LEN 3
 #define MAX_NUMBER_STR 32
-
-void GetBytesHumanReadable (size_t bytes, size_t wMaxRetLen, char *retpNumberStr)
-{
-    double kb = bytes/1024.0;
-    double mb = kb/1024.0;
-    double gb = mb/1024.0;
-    double tb = gb/1024.0;
- 
-    if(tb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%1.1f TB", tb);
-        return;
-    }
-
-    if(gb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%1.1f GB", gb);
-        return;
-    }
-
-    if(mb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%1.1f MB", mb);
-        return;
-    }
-
-    if(kb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%1.1f KB", kb);
-        return;
-    }
-
-    snprintf (retpNumberStr, wMaxRetLen, "%1.1f KB", kb);
-}
-
-
-void GetBytesHumanReadableAligned (size_t bytes, size_t wMaxRetLen, char *retpNumberStr)
-{
-    double kb = bytes/1024.0;
-    double mb = kb/1024.0;
-    double gb = mb/1024.0;
-    double tb = gb/1024.0;
-
-    if(tb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%6.1f TB", tb);
-        return;
-    }
-
-    if(gb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%6.1f GB", gb);
-        return;
-    }
-
-    if(mb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%6.1f MB", mb);
-        return;
-    }
-
-    if(kb > 0.8)
-    {
-        snprintf (retpNumberStr, wMaxRetLen, "%6.1f KB", kb);
-        return;
-    }
-
-    snprintf (retpNumberStr, wMaxRetLen, "%6.1f KB", kb);
-}
-
-
-int CalculatePerformanceString (size_t MSec, size_t Bytes, size_t wMaxRetLen, char *retpszPerformanceString)
-{
-    int    ret = 0;
-    size_t BytesPerSec = {0};
-    char   szNumStr[MAX_NUMBER_STR+1] = {0};
-
-    if (0 == wMaxRetLen)
-        return 1;
-
-    if (NULL == retpszPerformanceString)
-        return 1;
-
-    *retpszPerformanceString = '\0';
-
-    if (0 == MSec)
-        goto Done;
-
-    BytesPerSec = (Bytes * 1000) / MSec;
-
-    GetBytesHumanReadable (BytesPerSec, sizeof(szNumStr), szNumStr);
-
-    snprintf (retpszPerformanceString, wMaxRetLen, "%s/sec", szNumStr);
-
-Done:
-
-    return ret;
-}
-
-
-long time_diff_ms(struct timespec start, struct timespec end)
-{
-    return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
-}
 
 
 char* GenerateLoremBuffer (size_t TargetLen)
@@ -242,7 +139,7 @@ int SendTestMessages(const char *pszHostname,
                      const char *pszBodyFile,
                      const char *pszAttachmenFilePath,
                      const char *pszAttachmentName,
-		     const char *pszAttachmentBuffer,
+                     const char *pszAttachmentBuffer,
                      const char *pszCipherList,
                      int  Port,
                      size_t Options,
@@ -266,26 +163,26 @@ int SendTestMessages(const char *pszHostname,
 
     if ( (0 == TestBodySize) && ( 0 == TestAttSize) )
         TestBodySize = 1024;
-   
+
     for (count = 1; count <= TestMessageCount; count++)
     {
         if (TestAttSize)
-	{
+        {
             pszLocalAttachmentBuffer = GenerateLoremBuffer (TestAttSize);
             pszAttachmentBuffer = pszLocalAttachmentBuffer;
 
             TotalSize = TestAttSize;
-	}
-	else if (TestBodySize)
-	{
+        }
+        else if (TestBodySize)
+        {
             pszLocalBodyBuffer = GenerateLoremBuffer (TestBodySize);
             pszBody = pszLocalBodyBuffer;
 
-	    TotalSize = TestBodySize; 
-	}
+            TotalSize = TestBodySize;
+        }
 
-	snprintf (szSubject, sizeof (szSubject), "nshmailx test mail #%ld", count);
-	pszSubject = szSubject;
+        snprintf (szSubject, sizeof (szSubject), "nshmailx test mail #%ld", count);
+        pszSubject = szSubject;
 
         clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -302,38 +199,37 @@ int SendTestMessages(const char *pszHostname,
                               pszBodyFile,
                               pszAttachmenFilePath,
                               pszAttachmentName,
-			      pszAttachmentBuffer,
+                              pszAttachmentBuffer,
                               pszCipherList,
-			      NULL,
+                              NULL,
                               Port,
                               Options);
 
-        clock_gettime(CLOCK_MONOTONIC, &end);
-
+        clock_gettime (CLOCK_MONOTONIC, &end);
         diff_ms = time_diff_ms(start, end);
 
         GetBytesHumanReadable (TotalSize, sizeof(szNumStr), szNumStr);
         CalculatePerformanceString (diff_ms, TotalSize, sizeof(szPerformanceString), szPerformanceString);
         printf ("Mail send in %1.1f sec (Size: %s, Speed: %s)\n", (double)diff_ms / 1000.0, szNumStr, szPerformanceString);
 
-	// Release buffers if allocated
+        // Release buffers if allocated
 
         if (pszLocalAttachmentBuffer)
         {
             free (pszLocalAttachmentBuffer);
-	    pszLocalAttachmentBuffer = NULL;
-	}
-	
+            pszLocalAttachmentBuffer = NULL;
+        }
+
         if (pszLocalBodyBuffer)
         {
             free (pszLocalBodyBuffer);
             pszLocalBodyBuffer = NULL;
         }
 
-	if (rc)
-	{
-	    break;
-	}
+        if (rc)
+        {
+            break;
+        }
 
     } // for
 

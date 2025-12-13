@@ -7,6 +7,7 @@
 
 int sftp_put (const char *pszHost,
               uint16_t   nPort,
+              uint16_t   nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -15,6 +16,7 @@ int sftp_put (const char *pszHost,
 
 int sftp_get (const char *pszHost,
               uint16_t   nPort,
+              uint16_t   nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,

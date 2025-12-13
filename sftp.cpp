@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 
-#include "lib.hpp" 
+#include "lib.hpp"
 #include "sftp.hpp"
 
 
@@ -204,6 +205,7 @@ bool check_ssh_hostkey (LIBSSH2_SESSION *pSession, const char * pszExpectedHostK
 int sftp_transfer (int        Mode,
                    const char *pszHost,
                    uint16_t   nPort,
+                   uint16_t   nHash,
                    const char *pszUser,
                    const char *pszPass,
                    const char *pszLocalFile,
@@ -214,16 +216,32 @@ int sftp_transfer (int        Mode,
     int nSock   = -1;
     int rc      =  1; /* Assume error */
 
+    size_t  nBufferSize = 1024*1024;
     ssize_t cbIO      = 0;
     ssize_t cbWritten = 0;
-
-    char *p = NULL;
+    ssize_t cbTotal   = 0;
+    long diff_ms = 0;
 
     LIBSSH2_SESSION *pSession    = NULL;
     LIBSSH2_SFTP *pSftp          = NULL;
     LIBSSH2_SFTP_HANDLE *pHandle = NULL;
 
-    char szBuf[16384] = {0};
+    char szEmpty[] = "";
+    char szSHA[(EVP_MAX_MD_SIZE * 2) + 1] = {0};
+    char szNumStr[1024] = {0};
+    char szPerformanceString[1024] = {0};
+    char *pBuffer = NULL;
+    char *p = NULL;
+
+    const char *pszHashName = szEmpty;
+    unsigned char szDigest[EVP_MAX_MD_SIZE+1] = {0};
+    unsigned int  nDigestLen = 0;
+
+    EVP_MD_CTX *pMdCtx = NULL;
+    const EVP_MD *pMd  = NULL;
+
+    struct timespec start = {0};
+    struct timespec end   = {0};
 
     if (IsNullStr (pszHost))
     {
@@ -263,6 +281,10 @@ int sftp_transfer (int        Mode,
 
     if (0 == nPort)
         nPort = 22;
+
+    pBuffer = (char *) malloc (nBufferSize);
+
+    clock_gettime (CLOCK_MONOTONIC, &start);
 
     /* Open local file */
     if (SFTP_MODE_PUT == Mode)
@@ -357,12 +379,57 @@ int sftp_transfer (int        Mode,
         goto Done;
     }
 
+    switch (nHash)
+    {
+        case 1:
+            pMd = EVP_sha1();
+            break;
+
+        case 256:
+            pMd = EVP_sha256();
+            break;
+
+        case 384:
+            pMd = EVP_sha384();
+            break;
+
+        case 512:
+            pMd = EVP_sha512();
+            break;
+    }
+
+    if (pMd)
+    {
+        pszHashName = EVP_MD_get0_name (pMd);
+
+        if (NULL == pszHashName)
+            pszHashName = szEmpty;
+
+        pMdCtx = EVP_MD_CTX_new();
+        if (!pMdCtx)
+        {
+            LogError ("Cannot init hash context");
+            goto Done;
+        }
+
+        if (1 != EVP_DigestInit_ex (pMdCtx, pMd, NULL))
+        {
+            LogError ("Cannot init digest");
+            goto Done;
+        }
+    }
+    else if (nHash)
+    {
+        LogError ("Invalid hash algorithm");
+        goto Done;
+    }
+
     /* Transfer loop */
     while (true)
     {
         if (SFTP_MODE_PUT == Mode)
         {
-            cbIO = read (fdLocal, szBuf, sizeof (szBuf));
+            cbIO = read (fdLocal, pBuffer, nBufferSize);
             if (cbIO == 0)
                 break;
 
@@ -372,7 +439,17 @@ int sftp_transfer (int        Mode,
                 goto Done;
             }
 
-            p = szBuf;
+            if (pMdCtx)
+            {
+                if (1 != EVP_DigestUpdate (pMdCtx, pBuffer, cbIO))
+                {
+                    LogError ("Digest update failed");
+                    goto Done;
+                }
+            }
+
+            cbTotal += cbIO;
+            p = pBuffer;
 
             while (cbIO > 0)
             {
@@ -390,7 +467,7 @@ int sftp_transfer (int        Mode,
         }
         else if (SFTP_MODE_GET == Mode)
         {
-            cbIO = libssh2_sftp_read (pHandle, szBuf, sizeof (szBuf));
+            cbIO = libssh2_sftp_read (pHandle, pBuffer, nBufferSize);
 
             if (cbIO == 0)
                 break;
@@ -401,7 +478,17 @@ int sftp_transfer (int        Mode,
                 goto Done;
             }
 
-            p = szBuf;
+            if (pMdCtx)
+            {
+                if (1 != EVP_DigestUpdate (pMdCtx, pBuffer, cbIO))
+                {
+                    LogError ("Digest update failed");
+                    goto Done;
+                }
+            }
+
+            cbTotal += cbIO;
+            p = pBuffer;
 
             while (cbIO > 0)
             {
@@ -416,20 +503,61 @@ int sftp_transfer (int        Mode,
                 cbIO -= cbWritten;
             }
         }
-	else
+        else
         {
-	    goto Done;
-	}
+            goto Done;
+        }
     }
 
-    if (SFTP_MODE_PUT == Mode)
-        printf ("Upload successful: %s -> %s\n", pszLocalFile, pszRemotePath);
-    else if (SFTP_MODE_GET == Mode)
-        printf ("Dwonload successful: %s -> %s\n", pszRemotePath, pszLocalFile);
+    clock_gettime (CLOCK_MONOTONIC, &end);
+    diff_ms = time_diff_ms (start, end);
+
+    if (pMdCtx)
+    {
+        if (1 != EVP_DigestFinal_ex (pMdCtx, szDigest, &nDigestLen))
+        {
+            LogError ("Digest final failed");
+            goto Done;
+        }
+
+        for (unsigned int i = 0; i < nDigestLen; i++)
+            snprintf (szSHA + (i * 2), 3, "%02x", szDigest[i]);
+    }
+
+    GetBytesHumanReadable (cbTotal, sizeof (szNumStr), szNumStr);
+    CalculatePerformanceString (diff_ms, cbTotal, sizeof(szPerformanceString), szPerformanceString);
+    printf ("Mail send in %1.1f sec (Size: %s, Speed: %s)\n", (double)diff_ms / 1000.0, szNumStr, szPerformanceString);
+
+    if (*szSHA)
+    {
+        if (SFTP_MODE_PUT == Mode)
+            printf ("Upload successful: %s -> %s (size %s, transfer: %s, %s: %s)\n", pszLocalFile, pszRemotePath, szNumStr, szPerformanceString, pszHashName, szSHA);
+        else if (SFTP_MODE_GET == Mode)
+            printf ("Download successful: %s -> %s (size: %s, transfer: %s, %s: %s)\n", pszRemotePath, pszLocalFile, szNumStr, szPerformanceString, pszHashName, szSHA);
+    }
+    else
+    {
+        if (SFTP_MODE_PUT == Mode)
+            printf ("Upload successful: %s -> %s (size %s, transfer: %s)\n", pszLocalFile, pszRemotePath, szNumStr, szPerformanceString);
+        else if (SFTP_MODE_GET == Mode)
+            printf ("Download successful: %s -> %s (size: %s, transfer: %s)\n", pszRemotePath, pszLocalFile, szNumStr, szPerformanceString);
+    }
 
     rc = 0;
 
 Done:
+
+    if (pBuffer)
+    {
+        free (pBuffer);
+        pBuffer = NULL;
+    }
+
+    if (pMdCtx)
+    {
+        EVP_MD_CTX_free (pMdCtx);
+        pMdCtx = NULL;
+    }
 
     if (fdLocal != -1)
         close (fdLocal);
@@ -449,13 +577,14 @@ Done:
     if (nSock >= 0)
         close (nSock);
 
-    libssh2_exit ();
+    libssh2_exit();
     return rc;
 }
 
 
 int sftp_put (const char *pszHost,
               uint16_t   nPort,
+              uint16_t   nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -465,6 +594,7 @@ int sftp_put (const char *pszHost,
     return sftp_transfer (SFTP_MODE_PUT,
                           pszHost,
                           nPort,
+                          nHash,
                           pszUser,
                           pszPass,
                           pszLocalFile,
@@ -474,6 +604,7 @@ int sftp_put (const char *pszHost,
 
 int sftp_get (const char *pszHost,
               uint16_t   nPort,
+              uint16_t   nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -483,6 +614,7 @@ int sftp_get (const char *pszHost,
     return sftp_transfer (SFTP_MODE_GET,
                           pszHost,
                           nPort,
+                          nHash,
                           pszUser,
                           pszPass,
                           pszLocalFile,

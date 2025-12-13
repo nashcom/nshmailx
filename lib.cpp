@@ -220,3 +220,108 @@ int GetTimeString (time_t *pTime, char *retpszTime, size_t MaxBuffer)
 
     return 0;
 }
+
+
+void GetBytesHumanReadable (size_t bytes, size_t wMaxRetLen, char *retpNumberStr)
+{
+    double kb = bytes/1024.0;
+    double mb = kb/1024.0;
+    double gb = mb/1024.0;
+    double tb = gb/1024.0;
+
+    if(tb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%1.1f TB", tb);
+        return;
+    }
+
+    if(gb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%1.1f GB", gb);
+        return;
+    }
+
+    if(mb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%1.1f MB", mb);
+        return;
+    }
+
+    if(kb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%1.1f KB", kb);
+        return;
+    }
+
+    snprintf (retpNumberStr, wMaxRetLen, "%1.1f KB", kb);
+}
+
+
+void GetBytesHumanReadableAligned (size_t bytes, size_t wMaxRetLen, char *retpNumberStr)
+{
+    double kb = bytes/1024.0;
+    double mb = kb/1024.0;
+    double gb = mb/1024.0;
+    double tb = gb/1024.0;
+
+    if(tb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%6.1f TB", tb);
+        return;
+    }
+
+    if(gb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%6.1f GB", gb);
+        return;
+    }
+
+    if(mb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%6.1f MB", mb);
+        return;
+    }
+
+    if(kb > 0.8)
+    {
+        snprintf (retpNumberStr, wMaxRetLen, "%6.1f KB", kb);
+        return;
+    }
+
+    snprintf (retpNumberStr, wMaxRetLen, "%6.1f KB", kb);
+}
+
+
+int CalculatePerformanceString (size_t MSec, size_t Bytes, size_t wMaxRetLen, char *retpszPerformanceString)
+{
+    int    ret = 0;
+    size_t BytesPerSec    = {0};
+    char   szNumStr[1024] = {0};
+
+    if (0 == wMaxRetLen)
+        return 1;
+
+    if (NULL == retpszPerformanceString)
+        return 1;
+
+    *retpszPerformanceString = '\0';
+
+    if (0 == MSec)
+        goto Done;
+
+    BytesPerSec = (Bytes * 1000) / MSec;
+
+    GetBytesHumanReadable (BytesPerSec, sizeof(szNumStr), szNumStr);
+
+    snprintf (retpszPerformanceString, wMaxRetLen, "%s/sec", szNumStr);
+
+Done:
+
+    return ret;
+}
+
+
+long time_diff_ms (struct timespec start, struct timespec end)
+{
+    return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+}

@@ -255,9 +255,10 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-sget <host>           SFTP Get. Specify SFTP host name or IP\n");
     fprintf (stderr, "-user <username>       SFTP user name\n");
     fprintf (stderr, "-password <password>   user password\n");
-    fprintf (stderr, "-att <filepath>        file to upload\n");
-    fprintf (stderr, "-remote <filepath>     remote path\n");
+    fprintf (stderr, "-local <filepath>      local file to sget/sput\n");
+    fprintf (stderr, "-remote <filepath>     remote file to sget/sput\n");
     fprintf (stderr, "-hostkey <base64>      SSH compatible expected host key in Base64 without trailing =\n");
+    fprintf (stderr, "-sha                   Calculate SHA256 hash for upload/download\n");
 
     fprintf (stderr, "\nNote: Also supports Linux BSD mailx command line sending options\n\n");
     fprintf (stderr, "Configuration file: %s\n\n", g_szConfigFile);
@@ -1180,7 +1181,7 @@ int EncryptMessage (const char *pszCert, BIO *pBioInput, BIO *pBioOutput)
 
     if (NULL == pX509Recipient)
     {
-	LogError ("Cannot get recipient public key", pszCert);
+    LogError ("Cannot get recipient public key", pszCert);
         goto Done;
     }
 
@@ -1242,7 +1243,7 @@ char *FindUserLineInFile (const char *pszFilename, const char *pszMailAddress)
 
     if (NULL == fp)
     {
-	printf ("Cannot open file: %s\n", pszFilename);
+    printf ("Cannot open file: %s\n", pszFilename);
         return NULL;
     }
 
@@ -1270,7 +1271,7 @@ char *FindUserLineInFile (const char *pszFilename, const char *pszMailAddress)
                 CurrentAddrLen++;
 
             LineLen++;
-	    p++;
+        p++;
         } /* while */
 
         if (AddrLen == CurrentAddrLen)
@@ -1327,7 +1328,7 @@ char * GetPubKeySMIME (const char *pszRecipient)
     if (pszLine)
     {
         free (pszLine);
-	pszLine = NULL;
+    pszLine = NULL;
     }
 
     return pszCertSMIME;
@@ -1351,7 +1352,7 @@ bool UserExists (const char *pszRecipient)
     {
         free (pszLine);
         pszLine = NULL;
-	bFound = true;
+    bFound = true;
     }
 
     return bFound;
@@ -1449,14 +1450,14 @@ int SendSmtpMessage (const char *pszHostname,
         if  (IsNullStr (pszSmimeCert))
         {
            pszLocalSMIME = GetPubKeySMIME (pszSendTo);
-	   pszSmimeCert = pszLocalSMIME;
+       pszSmimeCert = pszLocalSMIME;
 
            if  (IsNullStr (pszSmimeCert))
            {
-	       LogError ("No S/MIME key specified");
+           LogError ("No S/MIME key specified");
                goto Done;
-	   }
-	}
+       }
+    }
     }
 
     if (IsNullStr (pszHostname))
@@ -1491,7 +1492,7 @@ int SendSmtpMessage (const char *pszHostname,
         if (pszDomain)
         {
             pszDomain++;
-	    printf ("Domain: %s\n", pszDomain);
+        printf ("Domain: %s\n", pszDomain);
             CountMX = GetMxRecord (pszDomain, sizeof (szMX), szMX, &PriorityMX);
 
             if (CountMX)
@@ -1962,15 +1963,15 @@ int SendSmtpMessage (const char *pszHostname,
 
         ret = EncryptMessage (pszSmimeCert, g_pBioSMIME, pBioOutput);
 
-	/* Now first close S/MIME BIO to write again into output stream */
+    /* Now first close S/MIME BIO to write again into output stream */
         BIO_free_all (g_pBioSMIME);
         g_pBioSMIME = NULL;
 
-	if (ret)
-	{
+    if (ret)
+    {
             rc = 600;
             goto Done;
-	}
+    }
 
         MemSize = BIO_get_mem_data (pBioOutput, &pMem);
 
@@ -2042,7 +2043,7 @@ Done:
     if (pszLocalSMIME)
     {
         free (pszLocalSMIME);
-	pszLocalSMIME = NULL;
+    pszLocalSMIME = NULL;
     }
 
     if (!g_bSilent)
@@ -2247,6 +2248,7 @@ int main (int argc, const char *argv[])
     int Port     = 25;
     int SFTPPort = 22;
     int SFTPMode = 0;
+    uint16_t nHash = 0;
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2260,6 +2262,7 @@ int main (int argc, const char *argv[])
     const char *pszUser              = NULL;
     const char *pszPassword          = NULL;
     const char *pszRemotePath        = NULL;
+    const char *pszLocalPath         = NULL;
     const char *pszExpectedHostKey   = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
@@ -2371,7 +2374,7 @@ int main (int argc, const char *argv[])
             if (0 == Port)
                 goto InvalidSyntax;
 
-	    SFTPPort = Port;
+        SFTPPort = Port;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-server"))
@@ -2649,6 +2652,18 @@ int main (int argc, const char *argv[])
             pszRemotePath = argv[consumed];
         }
 
+        else if (0 == strcasecmp (argv[consumed], "-local"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszLocalPath = argv[consumed];
+        }
+
         else if (0 == strcasecmp (argv[consumed], "-hostkey"))
         {
             consumed++;
@@ -2659,6 +2674,31 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             pszExpectedHostKey = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-sha"))
+        {
+            nHash = 256;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-sha1"))
+        {
+            nHash = 1;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-sha256"))
+        {
+            nHash = 256;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-sha384"))
+        {
+            nHash = 384;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-sha512"))
+        {
+            nHash = 512;
         }
 
         else if (0 == strcasecmp (argv[consumed], "--"))
@@ -2687,13 +2727,13 @@ int main (int argc, const char *argv[])
 
     if (SFTP_MODE_PUT  == SFTPMode)
     {
-        ret = sftp_put (pszHostname, SFTPPort, pszUser, pszPassword, pszAttachmenFilePath, pszRemotePath, pszExpectedHostKey);
-	goto Done;
+        ret = sftp_put (pszHostname, SFTPPort, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
+    goto Done;
     }
 
     if (SFTP_MODE_GET == SFTPMode)
     {
-        ret = sftp_get (pszHostname, SFTPPort, pszUser, pszPassword, pszAttachmenFilePath, pszRemotePath, pszExpectedHostKey);
+        ret = sftp_get (pszHostname, SFTPPort, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
         goto Done;
     }
 

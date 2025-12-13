@@ -15,5 +15,9 @@ bool IsNullStr (const char *pszStr);
 size_t GetFileSize (const char *pszFileName);
 int GetRandomString (const char *pszCharset, size_t len, char *retpszRandomString);
 int GetTimeString (time_t *pTime, char *retpszTime, size_t MaxBuffer);
+void GetBytesHumanReadable (size_t bytes, size_t wMaxRetLen, char *retpNumberStr);
+void GetBytesHumanReadableAligned (size_t bytes, size_t wMaxRetLen, char *retpNumberStr);
+int CalculatePerformanceString (size_t MSec, size_t Bytes, size_t wMaxRetLen, char *retpszPerformanceString);
+long time_diff_ms(struct timespec start, struct timespec end);
 
 #endif
