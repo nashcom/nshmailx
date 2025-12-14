@@ -1,3 +1,6 @@
+
+/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
+
 #include <string>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +11,7 @@
 
 #include <openssl/err.h>
 #include <openssl/rand.h>
-
+#include <openssl/evp.h>
 
 void strdncpy (char *pszStr, const char *ct, size_t n)
 {
@@ -344,4 +347,167 @@ int FileExists (const char *pszFilename)
     else
         return 1;
 }
+
+
+const EVP_MD *GetEvpMdFromHashLen (const char *pszHash)
+{
+    size_t len;
+    size_t bits;
+
+    if (IsNullStr (pszHash))
+        return NULL;
+
+    len = strlen (pszHash);
+
+    /* hex string must be even length */
+    if (len & 1)
+        return NULL;
+
+    /* 4 bits per hex character */
+    bits = len * 4;
+
+    switch (bits)
+    {
+        case 160:
+            return EVP_sha1();
+
+        case 256:
+            return EVP_sha256();
+
+        case 384:
+            return EVP_sha384();
+
+        case 512:
+            return EVP_sha512();
+
+        default:
+            return NULL;
+    }
+}
+
+
+size_t GetStringFromPrompt (const char *pszPrompt, size_t BufferLen, char *retpszPassword)
+{
+    size_t len = 0;
+    char *p = retpszPassword;
+
+    if ((NULL == retpszPassword) || (0 == BufferLen))
+        return 0;
+
+    retpszPassword[0] = '\0';
+
+    if (IsNullStr (pszPrompt))
+        return 0;
+
+    fprintf (stdout, "%s: ", pszPrompt);
+    fflush (stdout);
+
+    if (!fgets (retpszPassword, BufferLen, stdin))
+        return 0;
+
+    while (*p)
+    {
+        if (*p < 32)
+        {
+            *p = '\0';
+            break;
+        }
+
+        p++;
+        len++;
+    }
+
+    return len;
+}
+
+
+size_t GetEnvironmentVar (const char *pszEnvName, size_t BufferLen, char *retpszPassword)
+{
+    const char *pszEnv = NULL;
+    size_t len = 0;
+
+    if ((NULL == retpszPassword) || (0 == BufferLen))
+        return 0;
+
+    retpszPassword[0] = '\0';
+
+    if (IsNullStr (pszEnvName))
+        return 0;
+
+    pszEnv = getenv(pszEnvName);
+    if (IsNullStr (pszEnv))
+    {
+        return 0;
+    }
+
+    snprintf (retpszPassword, BufferLen, "%s", pszEnv);
+    len = strlen (retpszPassword);
+
+    return len;
+}
+
+
+size_t GetStringFromFile (const char *pszFilename, size_t BufferLen, char *retpszPassword)
+{
+    FILE *fp   = NULL;
+    size_t len = 0;
+    size_t BufferLeft = 0;
+    char szTemp[4096] = {0};
+
+    char *p = szTemp;
+    char *r = retpszPassword;
+
+    if ((NULL == retpszPassword) || (0 == BufferLen))
+        return 0;
+
+    BufferLeft = BufferLen-1;
+
+    retpszPassword[0] = '\0';
+
+    if (IsNullStr (pszFilename))
+        return 0;
+
+    fp = fopen (pszFilename, "r");
+
+    if (NULL == fp)
+    {
+        return 0;
+    }
+
+    if (!fgets(szTemp, sizeof (szTemp), fp))
+    {
+        goto Done;
+    }
+
+    while (*p)
+    {
+        if (0 == BufferLeft)
+            break;
+
+        if (*p < 32)
+            break;
+
+        *r = *p;
+
+        p++;
+        r++;
+        len++;
+        BufferLeft--;
+    }
+
+    *r = '\0';
+
+    memset (szTemp, 0, sizeof(szTemp));
+
+Done:
+
+    if (fp)
+    {
+        fclose (fp);
+        fp = NULL;
+    }
+
+    return len;
+}
+
 

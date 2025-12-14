@@ -1,8 +1,10 @@
 
+/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
 
 #ifndef NSHMAILX_LIB_HEADER_HPP
 #define NSHMAILX_LIB_HEADER_HPP
 
+#include <openssl/evp.h>
 
 void strdncpy (char *pszStr, const char *ct, size_t n);
 void LogWarning (const char *pszErrorText);
@@ -20,5 +22,9 @@ void GetBytesHumanReadableAligned (size_t bytes, size_t wMaxRetLen, char *retpNu
 int CalculatePerformanceString (size_t MSec, size_t Bytes, size_t wMaxRetLen, char *retpszPerformanceString);
 long time_diff_ms(struct timespec start, struct timespec end);
 int FileExists (const char *pszFilename);
+const EVP_MD *GetEvpMdFromHashLen (const char *pszHash);
 
+size_t GetStringFromPrompt (const char *pszPrompt, size_t BufferLen, char *retpszPassword);
+size_t GetEnvironmentVar (const char *pszEnvName, size_t BufferLen, char *retpszPassword);
+size_t GetStringFromFile (const char *pszFilename, size_t BufferLen, char *retpszPassword);
 #endif

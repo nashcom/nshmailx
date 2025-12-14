@@ -128,10 +128,19 @@ Dump key and certificate information via OpenSSL code
 - Basic support for SFTP put
 - Source code restructuring  (lib.cpp and new sftp.cpp)
 
+1.2.3 14.12.2025
+
+- SFTP hash print and validation support
+- SFTP password options (env, file, prompt)
+- SFPT more paranoid and early error checking
+- SFTP don't overwrite local file on -sget
+- SFTP performance improvements
+- SFTP performance and size output in result
+
 */
 
 
-#define VERSION "1.2.2"
+#define VERSION "1.2.3"
 #define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -155,6 +164,7 @@ Dump key and certificate information via OpenSSL code
 #include <openssl/x509v3.h>
 #include <openssl/cms.h>
 #include <openssl/pem.h>
+#include <libssh2.h>
 
 #ifdef LIBRESSL_VERSION_NUMBER
 #else
@@ -204,11 +214,11 @@ char g_szCipherList[MAX_STR]        = {0};
 char g_szAllowedRecptsRegx[MAX_STR] = {0};
 
 
-
 void PrintVersion()
 {
     fprintf (stderr, "\nNash!Com SMTP Mail Tool %s\n", VERSION);
     fprintf (stderr, "%s\n", COPYRIGHT);
+    fprintf (stderr, "LibSSH2 %s\n", LIBSSH2_VERSION);
     fprintf (stderr, "%s\n", OpenSSL_version(OPENSSL_VERSION));
     fprintf (stderr, "(Build on: %s)\n", OPENSSL_VERSION_TEXT);
 }
@@ -244,6 +254,8 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-pem                   Dump pem data with cert/key info (specify twice for PEM of certificate chain)\n");
     fprintf (stderr, "-encrypt               Encrypt message with S/MIME\n");
     fprintf (stderr, "-smime                 S/MIME file with PEM or raw Base64 DER certificate\n");
+    fprintf (stderr, "-version               Print full version including OpenSSL version\n");
+    fprintf (stderr, "--version              Only print program version without any headers and newline\n");
 
     fprintf (stderr, "\n");
     fprintf (stderr, "-TestMessages          Number of test messages to send\n");
@@ -255,10 +267,14 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-sget <host>           SFTP Get. Specify SFTP host name or IP\n");
     fprintf (stderr, "-user <username>       SFTP user name\n");
     fprintf (stderr, "-password <password>   user password\n");
+    fprintf (stderr, "-password:env <var>    get user password from environment var\n");
+    fprintf (stderr, "-password:file <path>  get user password from file\n");
+    fprintf (stderr, "-password:promt        prompt for user password\n");
     fprintf (stderr, "-local <filepath>      local file to sget/sput\n");
     fprintf (stderr, "-remote <filepath>     remote file to sget/sput\n");
     fprintf (stderr, "-hostkey <base64>      SSH compatible expected host key in Base64 without trailing =\n");
     fprintf (stderr, "-sha                   Calculate SHA256 hash for upload/download\n");
+    fprintf (stderr, "-hash <expected hash>  Hash to verify. Hash type is derived from string (SHA1, SHA256, SHA384, SHA512)\n");
 
     fprintf (stderr, "\nNote: Also supports Linux BSD mailx command line sending options\n\n");
     fprintf (stderr, "Configuration file: %s\n\n", g_szConfigFile);
@@ -2228,7 +2244,7 @@ int main (int argc, const char *argv[])
     size_t SFTPPort = 22;
     size_t SFTPMode = 0;
     size_t nOptions = 0;
-    size_t nHash    = 0;
+    size_t nHashAlg = 0;
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2240,10 +2256,10 @@ int main (int argc, const char *argv[])
     const char *pszAttachmentName    = NULL;
     const char *pszSmimeCert         = NULL;
     const char *pszUser              = NULL;
-    const char *pszPassword          = NULL;
     const char *pszRemotePath        = NULL;
     const char *pszLocalPath         = NULL;
     const char *pszExpectedHostKey   = NULL;
+    const char *pszExpectedHash      = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
     const char *pszFrom              = g_szFrom;
@@ -2253,8 +2269,11 @@ int main (int argc, const char *argv[])
     const char *pszSmtpServerAddress = g_szSmtpServerAddress;
     const char *pszCipherList        = g_szCipherList;
 
+    char szPassword[255] = {0};
+
     size_t Options  = 0;
     size_t FileSize = 0;
+    size_t PasswordLen         = 0;
     size_t TestMessageCount    = 0;
     size_t TestMessageBodySize = 0;
     size_t TestMesageAttSize   = 0;
@@ -2278,10 +2297,16 @@ int main (int argc, const char *argv[])
         }
 
         else if  ( (0 == strcasecmp (argv[consumed], "-version")) ||
-                   (0 == strcasecmp (argv[consumed], "--version")) ||
                    (0 == strcasecmp (argv[consumed], "-ver")) )
         {
             PrintVersion();
+            ret = 0;
+            goto Done;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "--version"))
+        {
+            printf ("%s", VERSION);
             ret = 0;
             goto Done;
         }
@@ -2619,7 +2644,51 @@ int main (int argc, const char *argv[])
             if (argv[consumed][0] == '-')
                 goto InvalidSyntax;
 
-            pszPassword = argv[consumed];
+            snprintf (szPassword, sizeof (szPassword), "%s", argv[consumed]);
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-password:env"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            PasswordLen = GetEnvironmentVar (argv[consumed], sizeof (szPassword), szPassword);
+            if (0 == PasswordLen)
+            {
+                LogError ("No password returned");
+                goto Done;
+            }
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-password:file"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            PasswordLen = GetStringFromFile (argv[consumed], sizeof (szPassword), szPassword);
+            if (0 == PasswordLen)
+            {
+                LogError ("No password returned");
+                goto Done;
+            }
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-password:prompt"))
+        {
+            PasswordLen = GetStringFromPrompt ("Password", sizeof (szPassword), szPassword);
+            if (0 == PasswordLen)
+            {
+                LogError ("No password returned");
+                goto Done;
+            }
         }
 
         else if (0 == strcasecmp (argv[consumed], "-remote"))
@@ -2658,29 +2727,41 @@ int main (int argc, const char *argv[])
             pszExpectedHostKey = argv[consumed];
         }
 
+        else if (0 == strcasecmp (argv[consumed], "-hash"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            pszExpectedHash = argv[consumed];
+        }
+
         else if (0 == strcasecmp (argv[consumed], "-sha"))
         {
-            nHash = 256;
+            nHashAlg = 256;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-sha1"))
         {
-            nHash = 1;
+            nHashAlg = 1;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-sha256"))
         {
-            nHash = 256;
+            nHashAlg = 256;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-sha384"))
         {
-            nHash = 384;
+            nHashAlg = 384;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-sha512"))
         {
-            nHash = 512;
+            nHashAlg = 512;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-process"))
@@ -2714,13 +2795,13 @@ int main (int argc, const char *argv[])
 
     if (SFTP_MODE_PUT  == SFTPMode)
     {
-        ret = sftp_put (pszHostname, SFTPPort, nOptions, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
+        ret = sftp_put (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey, pszExpectedHash);
     goto Done;
     }
 
     if (SFTP_MODE_GET == SFTPMode)
     {
-        ret = sftp_get (pszHostname, SFTPPort, nOptions, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
+        ret = sftp_get (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey, pszExpectedHash);
         goto Done;
     }
 
@@ -2870,4 +2951,3 @@ InvalidSyntax:
 
     return ret;
 }
-

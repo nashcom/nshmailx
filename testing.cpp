@@ -1,4 +1,6 @@
 
+/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,3 +1,6 @@
+
+/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
+
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -204,14 +207,15 @@ bool check_ssh_hostkey (LIBSSH2_SESSION *pSession, const char * pszExpectedHostK
 
 int sftp_transfer (size_t     nMode,
                    const char *pszHost,
-                   uint16_t   nPort,
+                   size_t     nPort,
                    size_t     nOptions,
-                   uint16_t   nHash,
+                   size_t     nHashAlg,
                    const char *pszUser,
                    const char *pszPass,
                    const char *pszLocalFile,
                    const char *pszRemotePath,
-                   const char *pszExpectedHostKey)
+                   const char *pszExpectedHostKey,
+                   const char *pszExpectedHash)
 {
     int fdLocal = -1;
     int nSock   = -1;
@@ -277,6 +281,66 @@ int sftp_transfer (size_t     nMode,
     {
         LogError ("Missing remote path parameter");
         return -1;
+    }
+
+    switch (nHashAlg)
+    {
+        case 1:
+            pMd = EVP_sha1();
+            break;
+
+        case 256:
+            pMd = EVP_sha256();
+            break;
+
+        case 384:
+            pMd = EVP_sha384();
+            break;
+
+        case 512:
+            pMd = EVP_sha512();
+            break;
+    }
+
+    /* Derive hash from expected hash */
+    if (NULL == pMd)
+    {
+        if (false == IsNullStr (pszExpectedHash))
+        {
+            pMd = GetEvpMdFromHashLen (pszExpectedHash);
+
+            if (NULL == pMd)
+            {
+                LogError ("Provided hash is invalid");
+                goto Done;
+            }
+        }
+    }
+
+    if (pMd)
+    {
+        pszHashName = EVP_MD_get0_name (pMd);
+
+        if (NULL == pszHashName)
+            pszHashName = szEmpty;
+
+        pMdCtx = EVP_MD_CTX_new();
+        if (!pMdCtx)
+        {
+            LogError ("Cannot init hash context");
+            goto Done;
+        }
+
+        if (1 != EVP_DigestInit_ex (pMdCtx, pMd, NULL))
+        {
+            LogError ("Cannot init digest");
+            goto Done;
+        }
+    }
+    else if (nHashAlg)
+    {
+        LogError ("Invalid hash algorithm");
+        goto Done;
     }
 
    if ( (nMode != SFTP_MODE_GET) && (nMode != SFTP_MODE_PUT) )
@@ -374,7 +438,7 @@ int sftp_transfer (size_t     nMode,
 
     if (0 != libssh2_userauth_password (pSession, pszUser, pszPass))
     {
-        LogErrorSSH2 (pSession, "Authentication failed");
+        LogErrorSSH2 (pSession, "Cannot authenticate with remote host");
         goto Done;
     }
 
@@ -448,51 +512,6 @@ int sftp_transfer (size_t     nMode,
     if (NULL == pHandle)
     {
         LogError ("Unable to open remote file");
-        goto Done;
-    }
-
-    switch (nHash)
-    {
-        case 1:
-            pMd = EVP_sha1();
-            break;
-
-        case 256:
-            pMd = EVP_sha256();
-            break;
-
-        case 384:
-            pMd = EVP_sha384();
-            break;
-
-        case 512:
-            pMd = EVP_sha512();
-            break;
-    }
-
-    if (pMd)
-    {
-        pszHashName = EVP_MD_get0_name (pMd);
-
-        if (NULL == pszHashName)
-            pszHashName = szEmpty;
-
-        pMdCtx = EVP_MD_CTX_new();
-        if (!pMdCtx)
-        {
-            LogError ("Cannot init hash context");
-            goto Done;
-        }
-
-        if (1 != EVP_DigestInit_ex (pMdCtx, pMd, NULL))
-        {
-            LogError ("Cannot init digest");
-            goto Done;
-        }
-    }
-    else if (nHash)
-    {
-        LogError ("Invalid hash algorithm");
         goto Done;
     }
 
@@ -648,6 +667,18 @@ int sftp_transfer (size_t     nMode,
 
 Done:
 
+    if (false == IsNullStr (pszExpectedHash) && (*szSHA))
+    {
+        if (strcasecmp (pszExpectedHash, szSHA))
+        {
+            printf ("Info: Hash does not match - Expected [%s], Current: [%s]\n", pszExpectedHash, szSHA);
+        }
+        else
+        {
+            printf ("Info: Hash verified!\n");
+        }
+    }
+
     if (pBuffer)
     {
         free (pBuffer);
@@ -666,10 +697,10 @@ Done:
         close (fdLocal);
         fdLocal = -1;
 
-        /* If partially download delete the file */
-        if (rc)
+        if (SFTP_MODE_GET == nMode)
         {
-            if (SFTP_MODE_GET == nMode)
+            /* If partially download delete the file */
+            if (rc)
             {
                 printf ("Info: Deleting partial download file: %s\n", pszLocalFile);
                 remove (pszLocalFile);
@@ -700,43 +731,47 @@ Done:
 int sftp_put (const char *pszHost,
               size_t     nPort,
               size_t     nOptions,
-              size_t     nHash,
+              size_t     nHashAlg,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
               const char *pszRemotePath,
-              const char *pszExpectedHostKey)
+              const char *pszExpectedHostKey,
+              const char *pszExpectedHash)
 {
     return sftp_transfer (SFTP_MODE_PUT,
                           pszHost,
                           nPort,
                           nOptions,
-                          nHash,
+                          nHashAlg,
                           pszUser,
                           pszPass,
                           pszLocalFile,
                           pszRemotePath,
-                          pszExpectedHostKey);
+                          pszExpectedHostKey,
+                          pszExpectedHash);
 }
 
 int sftp_get (const char *pszHost,
               size_t     nPort,
               size_t     nOptions,
-              size_t     nHash,
+              size_t     nHashAlg,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
               const char *pszRemotePath,
-              const char *pszExpectedHostKey)
+              const char *pszExpectedHostKey,
+              const char *pszExpectedHash)
 {
     return sftp_transfer (SFTP_MODE_GET,
                           pszHost,
                           nPort,
                           nOptions,
-                          nHash,
+                          nHashAlg,
                           pszUser,
                           pszPass,
                           pszLocalFile,
                           pszRemotePath,
-                          pszExpectedHostKey);
+                          pszExpectedHostKey,
+                          pszExpectedHash);
 }

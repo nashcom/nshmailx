@@ -1,4 +1,7 @@
 
+
+/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
+
 #ifndef TESTING_HEADER_HPP
 #define TESTING_HEADER_HPP
 
