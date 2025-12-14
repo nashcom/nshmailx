@@ -322,6 +322,12 @@ int sftp_transfer (size_t     nMode,
     else if (SFTP_MODE_GET == nMode)
     {
         /* Open local file after checking if remote file exists */
+
+        if (FileExists (pszLocalFile))
+        {
+            LogError ("Local file already exists");
+            goto Done;
+        }
     }
     else
     {
@@ -642,18 +648,6 @@ int sftp_transfer (size_t     nMode,
 
 Done:
 
-    if (rc)
-    {
-        if (SFTP_MODE_GET == nMode)
-        {
-            if (FileExists (pszLocalFile))
-            {
-                printf ("Info: Deleting partial download file: %s\n", pszLocalFile);
-                remove (pszLocalFile);
-            }
-        }
-    }
-
     if (pBuffer)
     {
         free (pBuffer);
@@ -667,7 +661,21 @@ Done:
     }
 
     if (fdLocal != -1)
+    {
+        /* Close file in any case */
         close (fdLocal);
+        fdLocal = -1;
+
+        /* If partially download delete the file */
+        if (rc)
+        {
+            if (SFTP_MODE_GET == nMode)
+            {
+                printf ("Info: Deleting partial download file: %s\n", pszLocalFile);
+                remove (pszLocalFile);
+            }
+        }
+    }
 
     if (pHandle)
         libssh2_sftp_close (pHandle);
