@@ -202,9 +202,10 @@ bool check_ssh_hostkey (LIBSSH2_SESSION *pSession, const char * pszExpectedHostK
 }
 
 
-int sftp_transfer (int        Mode,
+int sftp_transfer (size_t     nMode,
                    const char *pszHost,
                    uint16_t   nPort,
+                   size_t     nOptions,
                    uint16_t   nHash,
                    const char *pszUser,
                    const char *pszPass,
@@ -216,10 +217,15 @@ int sftp_transfer (int        Mode,
     int nSock   = -1;
     int rc      =  1; /* Assume error */
 
-    size_t  nBufferSize = 1024*1024;
-    ssize_t cbIO      = 0;
-    ssize_t cbWritten = 0;
-    ssize_t cbTotal   = 0;
+    size_t   nBufferSize = 1024*1024;
+    ssize_t  cbIO        = 0;
+    ssize_t  cbWritten   = 0;
+    uint64_t cbTotal     = 0;
+    uint64_t FileSize    = 0;
+
+    unsigned int PercentNew  = 0;
+    unsigned int PercentLast = 0;
+
     long diff_ms = 0;
 
     LIBSSH2_SESSION *pSession    = NULL;
@@ -273,7 +279,7 @@ int sftp_transfer (int        Mode,
         return -1;
     }
 
-   if ( (Mode != SFTP_MODE_GET) && (Mode != SFTP_MODE_PUT) )
+   if ( (nMode != SFTP_MODE_GET) && (nMode != SFTP_MODE_PUT) )
     {
         LogError ("Invalid mode specified");
         return -1;
@@ -287,21 +293,31 @@ int sftp_transfer (int        Mode,
     clock_gettime (CLOCK_MONOTONIC, &start);
 
     /* Open local file */
-    if (SFTP_MODE_PUT == Mode)
+    if (SFTP_MODE_PUT == nMode)
+    {
+        FileSize = GetFileSize(pszLocalFile);
+
+        if (0 == FileSize)
+        {
+            LogError ("Local file is empty");
+            goto Done;
+        }
+
         fdLocal = open (pszLocalFile, O_RDONLY);
 
-    else if (SFTP_MODE_GET == Mode)
-        fdLocal = open (pszLocalFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
+        if (fdLocal < 0)
+        {
+            LogError ("Unable to open local file");
+            goto Done;
+        }
+    }
+    else if (SFTP_MODE_GET == nMode)
+    {
+        /* Open local file after checking if remote file exists */
+    }
     else
     {
         LogError ("Invalid mode");
-        goto Done;
-    }
-
-    if (fdLocal < 0)
-    {
-        LogError ("Unable to open local file");
         goto Done;
     }
 
@@ -318,7 +334,7 @@ int sftp_transfer (int        Mode,
         goto Done;
     }
 
-    pSession = libssh2_session_init ();
+    pSession = libssh2_session_init();
     if (!pSession)
     {
         LogError ("Session init failed");
@@ -356,7 +372,7 @@ int sftp_transfer (int        Mode,
     }
 
     /* Open remote file */
-    if (SFTP_MODE_PUT == Mode)
+    if (SFTP_MODE_PUT == nMode)
     {
         pHandle = libssh2_sftp_open (
             pSftp,
@@ -366,8 +382,48 @@ int sftp_transfer (int        Mode,
             LIBSSH2_FXF_TRUNC,
             0644);
     }
-    else if (SFTP_MODE_GET == Mode)
+    else if (SFTP_MODE_GET == nMode)
     {
+        LIBSSH2_SFTP_ATTRIBUTES attrs;
+
+        int rc = libssh2_sftp_stat (pSftp, pszRemotePath, &attrs);
+
+        if (0 == rc)
+        {
+            if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE)
+            {
+                FileSize = attrs.filesize;
+            }
+        }
+        else
+        {
+            unsigned long sftp_err = libssh2_sftp_last_error (pSftp);
+
+            if (LIBSSH2_FX_NO_SUCH_FILE == sftp_err)
+            {
+                LogError ("Remote file not found");
+                goto Done;
+            }
+            else
+            {
+                LogErrorSSH2 (pSession, "Cannot access remote file");
+                goto Done;
+            }
+        }
+
+        if (0 == FileSize)
+        {
+            LogErrorSSH2 (pSession, "Remote file is empty");
+            goto Done;
+        }
+
+        fdLocal = open (pszLocalFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fdLocal < 0)
+        {
+            LogError ("Unable to open local file for writing");
+            goto Done;
+        }
+
         pHandle = libssh2_sftp_open (
             pSftp,
             pszRemotePath,
@@ -429,7 +485,7 @@ int sftp_transfer (int        Mode,
     /* Transfer loop */
     while (true)
     {
-        if (SFTP_MODE_PUT == Mode)
+        if (SFTP_MODE_PUT == nMode)
         {
             cbIO = read (fdLocal, pBuffer, nBufferSize);
             if (cbIO == 0)
@@ -456,7 +512,6 @@ int sftp_transfer (int        Mode,
             while (cbIO > 0)
             {
                 cbWritten = libssh2_sftp_write (pHandle, p, cbIO);
-
                 if (cbWritten < 0)
                 {
                     LogError ("SFTP write error");
@@ -466,8 +521,19 @@ int sftp_transfer (int        Mode,
                 p    += cbWritten;
                 cbIO -= cbWritten;
             }
+
+            if (nOptions & SFTP_OPTIONS_PRINT_PROGRESS)
+            {
+                PercentNew = (unsigned int) (cbTotal * 100 / FileSize);
+                if (PercentLast != PercentNew)
+                {
+                    printf("\r[%3u%%]", PercentNew);
+                    fflush(stdout);
+                    PercentLast = PercentNew;
+                }
+            }
         }
-        else if (SFTP_MODE_GET == Mode)
+        else if (SFTP_MODE_GET == nMode)
         {
             cbIO = libssh2_sftp_read (pHandle, pBuffer, nBufferSize);
 
@@ -504,6 +570,17 @@ int sftp_transfer (int        Mode,
                 p    += cbWritten;
                 cbIO -= cbWritten;
             }
+
+            if (nOptions & SFTP_OPTIONS_PRINT_PROGRESS)
+            {
+                PercentNew = (unsigned int) (cbTotal * 100 / FileSize);
+                if (PercentLast != PercentNew)
+                {
+                    printf("\r[%3u%%]", PercentNew);
+                    fflush(stdout);
+                    PercentLast = PercentNew;
+                }
+            }
         }
         else
         {
@@ -511,6 +588,8 @@ int sftp_transfer (int        Mode,
         }
     }
 
+    /* Done */
+    printf("\r[100%%]\n");
     clock_gettime (CLOCK_MONOTONIC, &end);
     diff_ms = time_diff_ms (start, end);
 
@@ -526,21 +605,26 @@ int sftp_transfer (int        Mode,
             snprintf (szSHA + (i * 2), 3, "%02x", szDigest[i]);
     }
 
+    if (FileSize != cbTotal)
+    {
+        printf ("Info: File size does not match: %lu\n", cbTotal);
+    }
+
     GetBytesHumanReadable (cbTotal, sizeof (szNumStr), szNumStr);
     CalculatePerformanceString (diff_ms, cbTotal, sizeof(szPerformanceString), szPerformanceString);
 
     if (*szSHA)
     {
-        if (SFTP_MODE_PUT == Mode)
+        if (SFTP_MODE_PUT == nMode)
             printf ("Upload successful: %s -> %s (size %s, transfer: %s, %s: %s)\n", pszLocalFile, pszRemotePath, szNumStr, szPerformanceString, pszHashName, szSHA);
-        else if (SFTP_MODE_GET == Mode)
+        else if (SFTP_MODE_GET == nMode)
             printf ("Download successful: %s -> %s (size: %s, transfer: %s, %s: %s)\n", pszRemotePath, pszLocalFile, szNumStr, szPerformanceString, pszHashName, szSHA);
     }
     else
     {
-        if (SFTP_MODE_PUT == Mode)
+        if (SFTP_MODE_PUT == nMode)
             printf ("Upload successful: %s -> %s (size %s, transfer: %s)\n", pszLocalFile, pszRemotePath, szNumStr, szPerformanceString);
-        else if (SFTP_MODE_GET == Mode)
+        else if (SFTP_MODE_GET == nMode)
             printf ("Download successful: %s -> %s (size: %s, transfer: %s)\n", pszRemotePath, pszLocalFile, szNumStr, szPerformanceString);
     }
 
@@ -550,7 +634,7 @@ Done:
 
     if (rc)
     {
-        if (SFTP_MODE_GET == Mode)
+        if (SFTP_MODE_GET == nMode)
         {
             if (FileExists (pszLocalFile))
             {
@@ -596,8 +680,9 @@ Done:
 
 
 int sftp_put (const char *pszHost,
-              uint16_t   nPort,
-              uint16_t   nHash,
+              size_t     nPort,
+              size_t     nOptions,
+              size_t     nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -607,6 +692,7 @@ int sftp_put (const char *pszHost,
     return sftp_transfer (SFTP_MODE_PUT,
                           pszHost,
                           nPort,
+                          nOptions,
                           nHash,
                           pszUser,
                           pszPass,
@@ -616,8 +702,9 @@ int sftp_put (const char *pszHost,
 }
 
 int sftp_get (const char *pszHost,
-              uint16_t   nPort,
-              uint16_t   nHash,
+              size_t     nPort,
+              size_t     nOptions,
+              size_t     nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -627,6 +714,7 @@ int sftp_get (const char *pszHost,
     return sftp_transfer (SFTP_MODE_GET,
                           pszHost,
                           nPort,
+                          nOptions,
                           nHash,
                           pszUser,
                           pszPass,

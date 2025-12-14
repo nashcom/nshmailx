@@ -5,9 +5,13 @@
 #define SFTP_MODE_PUT 1
 #define SFTP_MODE_GET 2
 
+
+#define SFTP_OPTIONS_PRINT_PROGRESS   0x0001
+
 int sftp_put (const char *pszHost,
-              uint16_t   nPort,
-              uint16_t   nHash,
+              size_t     nPort,
+              size_t     nOptions,
+              size_t     nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,
@@ -15,8 +19,9 @@ int sftp_put (const char *pszHost,
 	      const char *pszExpectedHostKey);
 
 int sftp_get (const char *pszHost,
-              uint16_t   nPort,
-              uint16_t   nHash,
+              size_t     nPort,
+              size_t     nOptions,
+              size_t     nHash,
               const char *pszUser,
               const char *pszPass,
               const char *pszLocalFile,

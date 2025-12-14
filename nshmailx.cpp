@@ -280,7 +280,6 @@ void PrintHelpText (char *pszName)
 }
 
 
-
 size_t RecvBuffer()
 {
     int    ret       = 0;
@@ -2225,10 +2224,11 @@ int main (int argc, const char *argv[])
     int rc  = 0;
     int ret = 1;
     int consumed = 1;
-    int Port     = 25;
-    int SFTPPort = 22;
-    int SFTPMode = 0;
-    uint16_t nHash = 0;
+    size_t Port     = 25;
+    size_t SFTPPort = 22;
+    size_t SFTPMode = 0;
+    size_t nOptions = 0;
+    size_t nHash    = 0;
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2683,6 +2683,11 @@ int main (int argc, const char *argv[])
             nHash = 512;
         }
 
+        else if (0 == strcasecmp (argv[consumed], "-process"))
+        {
+            nOptions |= SFTP_OPTIONS_PRINT_PROGRESS;
+        }
+
         else if (0 == strcasecmp (argv[consumed], "--"))
         {
             /* Ignored parameter */
@@ -2709,13 +2714,13 @@ int main (int argc, const char *argv[])
 
     if (SFTP_MODE_PUT  == SFTPMode)
     {
-        ret = sftp_put (pszHostname, SFTPPort, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
+        ret = sftp_put (pszHostname, SFTPPort, nOptions, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
     goto Done;
     }
 
     if (SFTP_MODE_GET == SFTPMode)
     {
-        ret = sftp_get (pszHostname, SFTPPort, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
+        ret = sftp_get (pszHostname, SFTPPort, nOptions, nHash, pszUser, pszPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey);
         goto Done;
     }
 
