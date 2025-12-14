@@ -262,17 +262,20 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-TestBodySize <bytes>  Bytes to sent for each test message body\n");
     fprintf (stderr, "-TestAttSize  <bytes>  Size of test attachment in bytes\n");
 
-    fprintf (stderr, "\n\nSFTP Put Options (only supports user/password. for key authentication use scp)\n\n");
-    fprintf (stderr, "-sput <host>           SFTP Put. Specify SFTP host name or IP\n");
-    fprintf (stderr, "-sget <host>           SFTP Get. Specify SFTP host name or IP\n");
+    fprintf (stderr, "\n\n");
+    fprintf (stderr, "SFTP Options           [Only supports user/password. For key authentication use scp.]\n\n");
+    fprintf (stderr, "-sput <host>           SFTP Put (specify host name or IP).\n");
+    fprintf (stderr, "-sget <host>           SFTP Get.(specify host name or IP).\n");
     fprintf (stderr, "-user <username>       SFTP user name\n");
-    fprintf (stderr, "-password <password>   user password\n");
-    fprintf (stderr, "-password:env <var>    get user password from environment var\n");
-    fprintf (stderr, "-password:file <path>  get user password from file\n");
-    fprintf (stderr, "-password:promt        prompt for user password\n");
-    fprintf (stderr, "-local <filepath>      local file to sget/sput\n");
-    fprintf (stderr, "-remote <filepath>     remote file to sget/sput\n");
+    fprintf (stderr, "-password <password>   User password\n");
+    fprintf (stderr, "-password:env <var>    Get user password from environment var\n");
+    fprintf (stderr, "-password:file <path>  Get user password from file\n");
+    fprintf (stderr, "-password:promt        Prompt for user password\n");
+    fprintf (stderr, "-local <filepath>      Local file to sget/sput\n");
+    fprintf (stderr, "-remote <filepath>     Remote file to sget/sput\n");
     fprintf (stderr, "-hostkey <base64>      SSH compatible expected host key in Base64 without trailing =\n");
+    fprintf (stderr, "-hostkey:env <var>     Read SSH compatible expected host key from environment var (Base64 without trailing =)\n");
+    fprintf (stderr, "-hostkey:file          Read SSH compatible expected host key from file (Base64 without trailing =)\n");
     fprintf (stderr, "-sha                   Calculate SHA256 hash for upload/download\n");
     fprintf (stderr, "-hash <expected hash>  Hash to verify. Hash type is derived from string (SHA1, SHA256, SHA384, SHA512)\n");
 
@@ -2258,7 +2261,6 @@ int main (int argc, const char *argv[])
     const char *pszUser              = NULL;
     const char *pszRemotePath        = NULL;
     const char *pszLocalPath         = NULL;
-    const char *pszExpectedHostKey   = NULL;
     const char *pszExpectedHash      = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
@@ -2269,11 +2271,11 @@ int main (int argc, const char *argv[])
     const char *pszSmtpServerAddress = g_szSmtpServerAddress;
     const char *pszCipherList        = g_szCipherList;
 
-    char szPassword[255] = {0};
+    char szPassword[255]        = {0};
+    char szExpectedHostKey[255] = {0};
 
     size_t Options  = 0;
     size_t FileSize = 0;
-    size_t PasswordLen         = 0;
     size_t TestMessageCount    = 0;
     size_t TestMessageBodySize = 0;
     size_t TestMesageAttSize   = 0;
@@ -2656,8 +2658,7 @@ int main (int argc, const char *argv[])
             if (argv[consumed][0] == '-')
                 goto InvalidSyntax;
 
-            PasswordLen = GetEnvironmentVar (argv[consumed], sizeof (szPassword), szPassword);
-            if (0 == PasswordLen)
+            if (0 == GetEnvironmentVar (argv[consumed], sizeof (szPassword), szPassword))
             {
                 LogError ("No password returned");
                 goto Done;
@@ -2673,8 +2674,7 @@ int main (int argc, const char *argv[])
             if (argv[consumed][0] == '-')
                 goto InvalidSyntax;
 
-            PasswordLen = GetStringFromFile (argv[consumed], sizeof (szPassword), szPassword);
-            if (0 == PasswordLen)
+            if (0 == GetStringFromFile (argv[consumed], sizeof (szPassword), szPassword))
             {
                 LogError ("No password returned");
                 goto Done;
@@ -2683,8 +2683,7 @@ int main (int argc, const char *argv[])
 
         else if (0 == strcasecmp (argv[consumed], "-password:prompt"))
         {
-            PasswordLen = GetStringFromPrompt ("Password", sizeof (szPassword), szPassword);
-            if (0 == PasswordLen)
+            if (0 == GetStringFromPrompt ("Password", sizeof (szPassword), szPassword))
             {
                 LogError ("No password returned");
                 goto Done;
@@ -2724,7 +2723,39 @@ int main (int argc, const char *argv[])
             if (argv[consumed][0] == '-')
                 goto InvalidSyntax;
 
-            pszExpectedHostKey = argv[consumed];
+            snprintf (szExpectedHostKey, sizeof (szExpectedHostKey), "%s", argv[consumed]);
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-hostkey:env"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            if (0 == GetEnvironmentVar (argv[consumed], sizeof (szExpectedHostKey), szExpectedHostKey))
+            {
+                LogError ("No host key returned");
+                goto Done;
+            }
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-hostkey:file"))
+        {
+            consumed++;
+            if (consumed >= argc)
+                goto InvalidSyntax;
+
+            if (argv[consumed][0] == '-')
+                goto InvalidSyntax;
+
+            if (0 == GetStringFromFile (argv[consumed], sizeof (szExpectedHostKey), szExpectedHostKey))
+            {
+                LogError ("No host key returned");
+                goto Done;
+            }
         }
 
         else if (0 == strcasecmp (argv[consumed], "-hash"))
@@ -2795,13 +2826,13 @@ int main (int argc, const char *argv[])
 
     if (SFTP_MODE_PUT  == SFTPMode)
     {
-        ret = sftp_put (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey, pszExpectedHash);
+        ret = sftp_put (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, szExpectedHostKey, pszExpectedHash);
     goto Done;
     }
 
     if (SFTP_MODE_GET == SFTPMode)
     {
-        ret = sftp_get (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, pszExpectedHostKey, pszExpectedHash);
+        ret = sftp_get (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, szExpectedHostKey, pszExpectedHash);
         goto Done;
     }
 

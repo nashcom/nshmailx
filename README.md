@@ -23,10 +23,11 @@ It also brings an admin into full control of the sending process.
 
 
 ```
-Nash!Com SMTP Mail Tool 1.2.2
+Nash!Com SMTP Mail Tool 1.2.3
 Copyright 2024-2025, Nash!Com, Daniel Nashed
-OpenSSL 3.5.1 1 Jul 2025
-(Build on: OpenSSL 3.5.1 1 Jul 2025)
+LibSSH2 1.11.0
+OpenSSL 3.0.13 30 Jan 2024
+(Build on: OpenSSL 3.0.13 30 Jan 2024)
 
 Usage: nshmailx [Options]
 
@@ -54,21 +55,30 @@ Usage: nshmailx [Options]
 -pem                   Dump pem data with cert/key info (specify twice for PEM of certificate chain)
 -encrypt               Encrypt message with S/MIME
 -smime                 S/MIME file with PEM or raw Base64 DER certificate
+-version               Print full version including OpenSSL version
+--version              Only print program version without any headers and newline
 
 -TestMessages          Number of test messages to send
 -TestBodySize <bytes>  Bytes to sent for each test message body
 -TestAttSize  <bytes>  Size of test attachment in bytes
 
 
-SFTP Put Options (only supports user/password. for key authentication use scp)
+SFTP Options           [Only supports user/password. For key authentication use scp.]
 
--sput <host>           SFTP Put. Specify SFTP host name or IP
--sget <host>           SFTP Get. Specify SFTP host name or IP
+-sput <host>           SFTP Put (specify host name or IP).
+-sget <host>           SFTP Get.(specify host name or IP).
 -user <username>       SFTP user name
--password <password>   user password
--att <filepath>        file to upload
--remote <filepath>     remote path
+-password <password>   User password
+-password:env <var>    Get user password from environment var
+-password:file <path>  Get user password from file
+-password:promt        Prompt for user password
+-local <filepath>      Local file to sget/sput
+-remote <filepath>     Remote file to sget/sput
 -hostkey <base64>      SSH compatible expected host key in Base64 without trailing =
+-hostkey:env <var>     Read SSH compatible expected host key from environment var (Base64 without trailing =)
+-hostkey:file          Read SSH compatible expected host key from file (Base64 without trailing =)
+-sha                   Calculate SHA256 hash for upload/download
+-hash <expected hash>  Hash to verify. Hash type is derived from string (SHA1, SHA256, SHA384, SHA512)
 
 Note: Also supports Linux BSD mailx command line sending options
 
@@ -88,7 +98,6 @@ verify=0|1             Verify certificate chain
 ecdsa=0|1              Use ECDSA instead of RSA
 utf8=0|1               Use UTF8
 silent=0|1             Run silent. Only log errors to stderr
-
 ```
 
 ## Command Line Examples
