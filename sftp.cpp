@@ -589,7 +589,9 @@ int sftp_transfer (size_t     nMode,
     }
 
     /* Done */
-    printf("\r[100%%]\n");
+    if (nOptions & SFTP_OPTIONS_PRINT_PROGRESS)
+        printf("\r[100%%]\n");
+
     clock_gettime (CLOCK_MONOTONIC, &end);
     diff_ms = time_diff_ms (start, end);
 
