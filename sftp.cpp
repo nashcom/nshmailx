@@ -295,11 +295,19 @@ int sftp_transfer (size_t     nMode,
     /* Open local file */
     if (SFTP_MODE_PUT == nMode)
     {
-        FileSize = GetFileSize(pszLocalFile);
-
-        if (0 == FileSize)
+        if (FileExists (pszLocalFile))
         {
-            LogError ("Local file is empty");
+            FileSize = GetFileSize (pszLocalFile);
+
+            if (0 == FileSize)
+            {
+                LogError ("Local file is empty");
+                goto Done;
+            }
+        }
+        else
+        {
+            LogError ("Local file not found");
             goto Done;
         }
 
