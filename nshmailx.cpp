@@ -139,12 +139,16 @@ Dump key and certificate information via OpenSSL code
 
 1.2.4 01.03.2026 
 
-Make SFTP optional and remove dependency for libssh2 if compiled without SFTP
+- Make SFTP optional and remove dependency for libssh2 if compiled without SFTP
+
+1.2.5 01.03.2026 
+
+- Improve EHLO response parsing to work correctly with STARTTLS logic 
 
 */
 
 
-#define VERSION "1.2.4"
+#define VERSION "1.2.5"
 #define COPYRIGHT "Copyright 2024-2026, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -348,55 +352,55 @@ size_t RecvBuffer()
 
 int GetReturnCode()
 {
-    int    rc   = 0;
-    size_t len  = 0;
-    char   *p   = g_szBuffer;
-    char   *pMessage = NULL;
+    int    rc    = 0;
+    size_t len   = 0;
+    bool   bDone = false;
+    char  *pLine = NULL;
 
-    len = RecvBuffer();
-
-    if (len <= 0)
-        return 500;
-
-    if (g_Trace)
-        printf ("S:%s", g_szBuffer);
-
-    while (*p)
+    while (false == bDone)
     {
-        if (*p <= 32)
+        len = RecvBuffer();
+        if (0 == len)
+            return 500;
+
+        pLine = strtok(g_szBuffer, "\r\n");
+
+        if (g_Trace && pLine)
         {
-            if (*p == ' ')
-                pMessage = p+1;
-            *p = '\0';
-            break;
+                printf("S:%s\n", pLine);
         }
-        p++;
-    }
 
-    rc = atoi (g_szBuffer);
-
-    if (221 == rc)
-    {
-        /* needs logging */
-    }
-    else if ( (rc >= 200) && (rc < 400) )
-        return 0;
-
-    if (pMessage)
-    {
-        p = pMessage;
-        while (*p)
+        while (pLine)
         {
-            if (*p < 32)
+            if (strlen(pLine) < 4)
             {
-                *p = '\0';
+                strdncpy (g_szErrorBuffer, pLine, sizeof (g_szErrorBuffer));
+                return 500;
+            }
+
+            rc = atoi(pLine);
+
+            if (pLine[3] == ' ')
+            {
+                bDone = true;
                 break;
             }
-            p++;
-        }
+            else if (pLine[3] == '-')
+            {
+                bDone = false;
+            }
+            else
+            {
+                strdncpy (g_szErrorBuffer, pLine, sizeof (g_szErrorBuffer));
+                return 500;
+            }
 
-        strdncpy (g_szErrorBuffer, pMessage, sizeof (g_szErrorBuffer));
+            pLine = strtok(NULL, "\r\n");
+        }
     }
+
+    if (rc >= 200 && rc < 400)
+        return 0;
 
     return rc;
 }
