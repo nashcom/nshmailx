@@ -1,8 +1,8 @@
 /*
 ###########################################################################
 # NashCom SMTP mail test/send tool (nshmailx)                             #
-# Version 1.2.2 14.12.2025                                                #
-# (C) Copyright Daniel Nashed/NashCom 2025                                #
+# Version 1.2.4 01.03.2026                                                #
+# (C) Copyright Daniel Nashed/NashCom 2025-2026                           #
 #                                                                         #
 # This application can be used to troubleshoot and test SMTP connections. #
 #                                                                         #
@@ -132,16 +132,20 @@ Dump key and certificate information via OpenSSL code
 
 - SFTP hash print and validation support
 - SFTP password options (env, file, prompt)
-- SFPT more paranoid and early error checking
+- SFTP more paranoid and early error checking
 - SFTP don't overwrite local file on -sget
 - SFTP performance improvements
 - SFTP performance and size output in result
 
+1.2.4 01.03.2026 
+
+Make SFTP optional and remove dependency for libssh2 if compiled without SFTP
+
 */
 
 
-#define VERSION "1.2.3"
-#define COPYRIGHT "Copyright 2024-2025, Nash!Com, Daniel Nashed"
+#define VERSION "1.2.4"
+#define COPYRIGHT "Copyright 2024-2026, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
 #include <regex>
@@ -164,7 +168,10 @@ Dump key and certificate information via OpenSSL code
 #include <openssl/x509v3.h>
 #include <openssl/cms.h>
 #include <openssl/pem.h>
+
+#ifdef WITH_SFTP_SUPPORT
 #include <libssh2.h>
+#endif
 
 #ifdef LIBRESSL_VERSION_NUMBER
 #else
@@ -175,6 +182,10 @@ Dump key and certificate information via OpenSSL code
 #include "lib.hpp"
 #include "sftp.hpp"
 #include "testing.hpp"
+
+#ifdef WITH_SFTP_SUPPORT
+#include "sftp.hpp"
+#endif
 
 #define MAX_BUFFER_LEN 65535
 #define MAX_STR        1024
@@ -218,7 +229,9 @@ void PrintVersion()
 {
     fprintf (stderr, "\nNash!Com SMTP Mail Tool %s\n", VERSION);
     fprintf (stderr, "%s\n", COPYRIGHT);
+#ifdef WITH_SFTP_SUPPORT
     fprintf (stderr, "LibSSH2 %s\n", LIBSSH2_VERSION);
+#endif
     fprintf (stderr, "%s\n", OpenSSL_version(OPENSSL_VERSION));
     fprintf (stderr, "(Build on: %s)\n", OPENSSL_VERSION_TEXT);
 }
@@ -610,7 +623,7 @@ Done:
 
 #else
 
-int GetX509Names (X509 *pCert, int nid, int type, int RetBufferLen, char *pszRetBuffer)
+int GetX509Names (const X509 *pCert, int nid, int type, int RetBufferLen, char *pszRetBuffer)
 {
     GENERAL_NAMES *pNames  = NULL;
     GENERAL_NAME  *pEntry  = NULL;
@@ -863,7 +876,7 @@ Done:
 }
 
 
-int LogCertInfos (const char *pszHeader, X509 *pCert, bool bDumpPEM)
+int LogCertInfos (const char *pszHeader, const X509 *pCert, bool bDumpPEM)
 {
     int ret = 0;
     const char *pStr  = NULL;
@@ -1026,7 +1039,7 @@ Done:
 
 static int VerifyCallback (int wPreverify, X509_STORE_CTX *pStoreCtx)
 {
-    X509 *pCert = X509_STORE_CTX_get_current_cert (pStoreCtx);
+    const X509 *pCert = X509_STORE_CTX_get_current_cert (pStoreCtx);
 
     if (NULL == pCert)
     {
@@ -1812,7 +1825,7 @@ int SendSmtpMessage (const char *pszHostname,
             pBioFile = NULL;
         }
 
-        BIO_flush (pBioMem);
+        (void) BIO_flush (pBioMem);
 
         snprintf (g_szBuffer, sizeof (g_szBuffer), "Content-Transfer-Encoding: base64%s", CRLF);
         SendBuffer (g_szBuffer);
@@ -1949,7 +1962,7 @@ int SendSmtpMessage (const char *pszHostname,
             pBioFile = NULL;
         }
 
-        BIO_flush (pBioMem);
+        (void) BIO_flush (pBioMem);
         MemSize = BIO_get_mem_data (pBioMem, &pMem);
 
         if ((pMem) && (MemSize))
@@ -1971,7 +1984,7 @@ int SendSmtpMessage (const char *pszHostname,
     if (g_pBioSMIME)
     {
         BIO *pBioOutput = NULL;
-        BIO_flush (g_pBioSMIME);
+        (void) BIO_flush (g_pBioSMIME);
 
         pBioOutput = BIO_new(BIO_s_mem());
         if (!pBioOutput)
@@ -2244,10 +2257,21 @@ int main (int argc, const char *argv[])
     int ret = 1;
     int consumed = 1;
     size_t Port     = 25;
+
+#ifdef WITH_SFTP_SUPPORT
     size_t SFTPPort = 22;
     size_t SFTPMode = 0;
     size_t nOptions = 0;
     size_t nHashAlg = 0;
+
+    const char *pszRemotePath        = NULL;
+    const char *pszLocalPath         = NULL;
+    const char *pszExpectedHash      = NULL;
+
+    char szPassword[255]        = {0};
+    char szExpectedHostKey[255] = {0};
+    const char *pszUser              = NULL;
+#endif
 
     const char *pszSendTo            = NULL;
     const char *pszCopyTo            = NULL;
@@ -2258,10 +2282,6 @@ int main (int argc, const char *argv[])
     const char *pszAttachmenFilePath = NULL;
     const char *pszAttachmentName    = NULL;
     const char *pszSmimeCert         = NULL;
-    const char *pszUser              = NULL;
-    const char *pszRemotePath        = NULL;
-    const char *pszLocalPath         = NULL;
-    const char *pszExpectedHash      = NULL;
 
     /* Set defaults from config overwritten by command line parameters */
     const char *pszFrom              = g_szFrom;
@@ -2271,8 +2291,6 @@ int main (int argc, const char *argv[])
     const char *pszSmtpServerAddress = g_szSmtpServerAddress;
     const char *pszCipherList        = g_szCipherList;
 
-    char szPassword[255]        = {0};
-    char szExpectedHostKey[255] = {0};
 
     size_t Options  = 0;
     size_t FileSize = 0;
@@ -2381,7 +2399,9 @@ int main (int argc, const char *argv[])
             if (0 == Port)
                 goto InvalidSyntax;
 
-        SFTPPort = Port;
+#ifdef WITH_SFTP_SUPPORT
+            SFTPPort = Port;
+#endif
         }
 
         else if (0 == strcasecmp (argv[consumed], "-server"))
@@ -2599,6 +2619,7 @@ int main (int argc, const char *argv[])
             }
         }
 
+#ifdef WITH_SFTP_SUPPORT
         else if ((0 == strcasecmp (argv[consumed], "sput")) ||
                 (0 == strcasecmp (argv[consumed], "-sput")))
         {
@@ -2799,6 +2820,7 @@ int main (int argc, const char *argv[])
         {
             nOptions |= SFTP_OPTIONS_PRINT_PROGRESS;
         }
+#endif
 
         else if (0 == strcasecmp (argv[consumed], "--"))
         {
@@ -2824,17 +2846,22 @@ int main (int argc, const char *argv[])
         consumed++;
     } /* while */
 
+
+#ifdef WITH_SFTP_SUPPORT
     if (SFTP_MODE_PUT  == SFTPMode)
     {
         ret = sftp_put (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, szExpectedHostKey, pszExpectedHash);
-    goto Done;
+        goto Done;
     }
 
     if (SFTP_MODE_GET == SFTPMode)
     {
         ret = sftp_get (pszHostname, SFTPPort, nOptions, nHashAlg, pszUser, szPassword, pszLocalPath, pszRemotePath, szExpectedHostKey, pszExpectedHash);
+	LogError ("SFTP is not supported in this version");
         goto Done;
     }
+
+#endif
 
     if  ((IsNullStr (pszSendTo)) && (IsNullStr (pszCopyTo)) && (IsNullStr (pszBlindCopyTo)))
     {

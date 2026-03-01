@@ -1,5 +1,5 @@
 
-/* Copyright Nash!Com, Daniel Nashed 2024-2025 - APACHE 2.0 see LICENSE */
+/* Copyright Nash!Com, Daniel Nashed 2024-2026 - APACHE 2.0 see LICENSE */
 
 #ifndef NSHMAILX_SFTP_HEADER_HPP
 #define NSHMAILX_SFTP_HEADER_HPP

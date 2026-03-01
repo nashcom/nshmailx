@@ -15,12 +15,14 @@
 
 #include <openssl/evp.h>
 #include <openssl/sha.h>
-#include <libssh2.h>
-#include <libssh2_sftp.h>
 
 #include "lib.hpp"
 #include "sftp.hpp"
 
+#ifdef WITH_SFTP_SUPPORT
+
+#include <libssh2.h>
+#include <libssh2_sftp.h>
 
 int tcp_connect (const char *pszHost, uint16_t nPort)
 {
@@ -775,3 +777,5 @@ int sftp_get (const char *pszHost,
                           pszExpectedHostKey,
                           pszExpectedHash);
 }
+
+#endif

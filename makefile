@@ -1,15 +1,15 @@
 ############################################################################
-# Copyright Nash!Com, Daniel Nashed 2024 - APACHE 2.0 see LICENSE
+# Copyright Nash!Com, Daniel Nashed 2024-2026 - APACHE 2.0 see LICENSE
 ############################################################################
 
 CC=g++
 CFLAGS=-g -Wall -c -fPIC -pedantic
 
 # If OpenSSL statically linked is available compile and link statically with it
-ifneq (,$(wildcard ../../openssl/libssl.a))
+ifneq (,$(wildcard ../openssl/libssl.a))
 
-LIBS=../../openssl/libssl.a ../../openssl/libcrypto.a -lresolv
-SSL_INCLUDE_PATH=-I../../openssl/include
+LIBS=../openssl/libssl.a ../openssl/libcrypto.a -lresolv
+SSL_INCLUDE_PATH=-I../openssl/include
 
 $(info )
 $(info Build with OpenSSL statically linked)
@@ -18,7 +18,7 @@ $(info )
 # On MacOS if LibreSSL is available, statically with it
 else ifneq (,$(wildcard /opt/local/lib/libssl.a))
 
-LIBS=/opt/local/lib/libssl.a /opt/local/lib/libcrypto.a -lresolv
+LIBS=/opt/local/lib/libssl.a /opt/local/lib/libcrypto.a -lresolv -static
 SSL_INCLUDE_PATH=-I/opt/local/include
 
 $(info )
@@ -31,12 +31,20 @@ $(info )
 # Else just link dynamically with OpenSSL
 else
 
-LIBS= -lssl -lcrypto -lresolv -lssh2
+LIBS = -lssl -lcrypto -lresolv
 
 $(info )
 $(info Build with OpenSSL dynamically linked)
 $(info )
 
+endif
+
+ifeq ($(WITH_SFTP_SUPPORT),1)
+    $(info )
+    $(info Build with with SFTP support)
+    $(info )
+    CFLAGS += -DWITH_SFTP_SUPPORT
+    LIBS   += -lssh2
 endif
 
 
