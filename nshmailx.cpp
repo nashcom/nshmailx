@@ -1,7 +1,7 @@
 /*
 ###########################################################################
 # NashCom SMTP mail test/send tool (nshmailx)                             #
-# Version 1.2.4 01.03.2026                                                #
+# Version 1.2.6 10.03.2026                                                #
 # (C) Copyright Daniel Nashed/NashCom 2025-2026                           #
 #                                                                         #
 # This application can be used to troubleshoot and test SMTP connections. #
@@ -145,10 +145,14 @@ Dump key and certificate information via OpenSSL code
 
 - Improve EHLO response parsing to work correctly with STARTTLS logic 
 
+1.2.6 10.03.2026
+
+- Improved status code return waiting for the right '2xx ' stauts code
+
 */
 
 
-#define VERSION "1.2.5"
+#define VERSION "1.2.6"
 #define COPYRIGHT "Copyright 2024-2026, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -350,59 +354,61 @@ size_t RecvBuffer()
 }
 
 
+int ResponseCode (const char *pszBuffer)
+{
+    if (NULL == pszBuffer)
+        return -1;
+
+    if ('\0' == *pszBuffer)
+        return 0;
+
+    if  (!isdigit(pszBuffer[0]) ||
+         !isdigit(pszBuffer[1]) ||
+         !isdigit(pszBuffer[2]))
+        return 0;
+
+    if (' ' != pszBuffer[3])
+        return 0;
+
+    return atoi (pszBuffer);
+}
+
+
 int GetReturnCode()
 {
-    int    rc    = 0;
-    size_t len   = 0;
-    bool   bDone = false;
-    char  *pLine = NULL;
+    int    rc  = 0;
+    size_t len = 0;
+    char   *p  = NULL;
 
-    while (false == bDone)
+    while (!rc)
     {
         len = RecvBuffer();
-        if (0 == len)
-            return 500;
+        if (len <= 0)
+            return 1;
 
-        pLine = strtok(g_szBuffer, "\r\n");
+        if (g_Trace)
+            printf("S:%s", g_szBuffer);
 
-        if (g_Trace && pLine)
+        p = g_szBuffer;
+
+        while (*p)
         {
-                printf("S:%s\n", pLine);
-        }
-
-        while (pLine)
-        {
-            if (strlen(pLine) < 4)
-            {
-                strdncpy (g_szErrorBuffer, pLine, sizeof (g_szErrorBuffer));
-                return 500;
-            }
-
-            rc = atoi(pLine);
-
-            if (pLine[3] == ' ')
-            {
-                bDone = true;
+            rc = ResponseCode(p);
+            if (rc)
                 break;
-            }
-            else if (pLine[3] == '-')
-            {
-                bDone = false;
-            }
-            else
-            {
-                strdncpy (g_szErrorBuffer, pLine, sizeof (g_szErrorBuffer));
-                return 500;
-            }
 
-            pLine = strtok(NULL, "\r\n");
+            p = strstr(p, "\r\n");
+            if (!p)
+                break;
+
+            p += 2;
         }
     }
 
     if (rc >= 200 && rc < 400)
         return 0;
 
-    return rc;
+    return 1;
 }
 
 
