@@ -149,10 +149,14 @@ Dump key and certificate information via OpenSSL code
 
 - Improved status code return waiting for the right '2xx ' stauts code
 
+1.2.7 10.0.2026
+
+- Add Priority and Importance
+
 */
 
 
-#define VERSION "1.2.6"
+#define VERSION "1.2.7"
 #define COPYRIGHT "Copyright 2024-2026, Nash!Com, Daniel Nashed"
 
 /* C++ includes */
@@ -265,6 +269,8 @@ void PrintHelpText (char *pszName)
     fprintf (stderr, "-att <filepath>        Attachment to send (specify '-' for attaching stdin to a file)\n");
     fprintf (stderr, "-attname <filename>    File name for file to attach\n");
     fprintf (stderr, "-mailer <name>         Mailer Name\n");
+    fprintf (stderr, "-high                  High message priority/importance\n");
+    fprintf (stderr, "-low                   Low message priority/importance\n");
     fprintf (stderr, "-cipher <cipher list>  OpenSSL cipher list string (colon separated) used for a connection\n");
     fprintf (stderr, "-NoTLS                 Disable TLS/SSL\n");
     fprintf (stderr, "-NoTLS13               Disable TLS 1.3\n");
@@ -1740,6 +1746,25 @@ int SendSmtpMessage (const char *pszHostname,
         SendBuffer (g_szBuffer);
     }
 
+    if (Options & NSHMAILX_OPTIONS_HIGH_PRIO)
+    {
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "X-Priority: 1%s", CRLF);
+        SendBuffer (g_szBuffer);
+
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "Importance: high%s", CRLF);
+        SendBuffer (g_szBuffer);
+    }
+    else if (Options & NSHMAILX_OPTIONS_LOW_PRIO)
+    {
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "X-Priority: 5%s", CRLF);
+        SendBuffer (g_szBuffer);
+
+        snprintf (g_szBuffer, sizeof (g_szBuffer), "Importance: low%s", CRLF);
+        SendBuffer (g_szBuffer);
+    }
+
+    strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tm);
+
     strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tm);
     GetRandomString (NULL, 20, szRandom);
 
@@ -2515,6 +2540,16 @@ int main (int argc, const char *argv[])
                 goto InvalidSyntax;
 
             pszMailer = argv[consumed];
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-high"))
+        {
+            Options |= NSHMAILX_OPTIONS_HIGH_PRIO;
+        }
+
+        else if (0 == strcasecmp (argv[consumed], "-low"))
+        {
+            Options |= NSHMAILX_OPTIONS_LOW_PRIO;
         }
 
         else if (0 == strcasecmp (argv[consumed], "-file"))

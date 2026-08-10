@@ -9,6 +9,8 @@
 #define NSHMAILX_OPTIONS_USE_ECDSA         0x0008
 #define NSHMAILX_OPTIONS_NO_UTF8           0x0010
 #define NSHMAILX_OPTIONS_ENCRYPT           0x0020
+#define NSHMAILX_OPTIONS_HIGH_PRIO         0x0040
+#define NSHMAILX_OPTIONS_LOW_PRIO          0x0080
 
 
 int SendSmtpMessage (const char *pszHostname,
